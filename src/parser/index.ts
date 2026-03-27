@@ -47,8 +47,10 @@ export interface PowerExpression {
   readonly kind: 'power-expression';
   readonly base: ExpressionNode;
   readonly exponent: ExpressionNode;
-  readonly exponentType: 'number' | 'unit';
+  readonly exponentType: ExponentType;
 }
+
+export type ExponentType = 'number' | 'unit' | 'expression';
 
 export interface ParsedExpression {
   readonly raw: string;
@@ -282,8 +284,16 @@ class DefaultExpressionParser implements ExpressionParser {
     throw new Error(`Expected expression at position ${token.position}.`);
   }
 
-  private getExponentType(base: ExpressionNode): 'number' | 'unit' {
-    return base.kind === 'unit' ? 'unit' : 'number';
+  private getExponentType(base: ExpressionNode): ExponentType {
+    if (base.kind === 'number') {
+      return 'number';
+    }
+
+    if (base.kind === 'unit') {
+      return 'unit';
+    }
+
+    return 'expression';
   }
 
   private matchOperator(state: ParseState, operator: string): boolean {

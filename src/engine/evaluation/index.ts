@@ -103,10 +103,31 @@ const evaluatePowerExpression = (node: PowerExpression, units: UnitRegistry): Ev
     throw new Error('Exponent must be dimensionless.');
   }
 
-  return {
+  const evaluateNumberExponent = (): EvaluationResult => ({
     value: Math.pow(base.value, exponent.value),
     dimension: powDimensions(base.dimension, exponent.value),
-  };
+  });
+
+  const evaluateUnitExponent = (): EvaluationResult => ({
+    value: Math.pow(base.value, exponent.value),
+    dimension: powDimensions(base.dimension, exponent.value),
+  });
+
+  const evaluateExpressionExponent = (): EvaluationResult => ({
+    value: Math.pow(base.value, exponent.value),
+    dimension: powDimensions(base.dimension, exponent.value),
+  });
+
+  switch (node.exponentType) {
+    case 'number':
+      return evaluateNumberExponent();
+    case 'unit':
+      return evaluateUnitExponent();
+    case 'expression':
+      return evaluateExpressionExponent();
+    default:
+      throw new Error('Unsupported exponent type.');
+  }
 };
 
 const evaluateNode = (node: ExpressionNode, units: UnitRegistry): EvaluationResult => {
