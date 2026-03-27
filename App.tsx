@@ -2,7 +2,7 @@ import { SafeAreaView, StatusBar, StyleSheet } from 'react-native';
 
 import { HomeScreen } from './src/screens/HomeScreen';
 
-const App = (): JSX.Element => {
+const App = () => {
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" />
