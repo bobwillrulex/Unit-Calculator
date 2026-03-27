@@ -38,60 +38,85 @@ export const DIMENSIONLESS: DimensionVector = createDimensionVector();
 const getExponent = (vector: DimensionVector, baseDimension: BaseDimension): number =>
   typeof vector[baseDimension] === 'number' ? vector[baseDimension] : 0;
 
+export const multiplyDimensions = (
+  left: DimensionVector,
+  right: DimensionVector,
+): DimensionVector => {
+  const result: Partial<Record<BaseDimension, number>> = {};
+
+  for (const baseDimension of BASE_DIMENSIONS) {
+    const exponent = getExponent(left, baseDimension) + getExponent(right, baseDimension);
+    if (exponent !== 0) {
+      result[baseDimension] = exponent;
+    }
+  }
+
+  return createDimensionVector(result);
+};
+
+export const divideDimensions = (
+  left: DimensionVector,
+  right: DimensionVector,
+): DimensionVector => {
+  const result: Partial<Record<BaseDimension, number>> = {};
+
+  for (const baseDimension of BASE_DIMENSIONS) {
+    const exponent = getExponent(left, baseDimension) - getExponent(right, baseDimension);
+    if (exponent !== 0) {
+      result[baseDimension] = exponent;
+    }
+  }
+
+  return createDimensionVector(result);
+};
+
+export const powDimensions = (vector: DimensionVector, exponent: number): DimensionVector => {
+  const normalizedExponent = normalizeDimensionEntry(exponent);
+
+  if (normalizedExponent === 0) {
+    return DIMENSIONLESS;
+  }
+
+  const result: Partial<Record<BaseDimension, number>> = {};
+
+  for (const baseDimension of BASE_DIMENSIONS) {
+    const poweredExponent = getExponent(vector, baseDimension) * normalizedExponent;
+    if (poweredExponent !== 0) {
+      result[baseDimension] = poweredExponent;
+    }
+  }
+
+  return createDimensionVector(result);
+};
+
+export const areDimensionsEqual = (
+  left: DimensionVector,
+  right: DimensionVector,
+): boolean => {
+  for (const baseDimension of BASE_DIMENSIONS) {
+    if (getExponent(left, baseDimension) !== getExponent(right, baseDimension)) {
+      return false;
+    }
+  }
+
+  return true;
+};
+
 export const dimensionAlgebra = {
   multiply(left: DimensionVector, right: DimensionVector): DimensionVector {
-    const result: Partial<Record<BaseDimension, number>> = {};
-
-    for (const baseDimension of BASE_DIMENSIONS) {
-      const exponent = getExponent(left, baseDimension) + getExponent(right, baseDimension);
-      if (exponent !== 0) {
-        result[baseDimension] = exponent;
-      }
-    }
-
-    return createDimensionVector(result);
+    return multiplyDimensions(left, right);
   },
 
   divide(left: DimensionVector, right: DimensionVector): DimensionVector {
-    const result: Partial<Record<BaseDimension, number>> = {};
-
-    for (const baseDimension of BASE_DIMENSIONS) {
-      const exponent = getExponent(left, baseDimension) - getExponent(right, baseDimension);
-      if (exponent !== 0) {
-        result[baseDimension] = exponent;
-      }
-    }
-
-    return createDimensionVector(result);
+    return divideDimensions(left, right);
   },
 
   pow(vector: DimensionVector, exponent: number): DimensionVector {
-    const normalizedExponent = normalizeDimensionEntry(exponent);
-
-    if (normalizedExponent === 0) {
-      return DIMENSIONLESS;
-    }
-
-    const result: Partial<Record<BaseDimension, number>> = {};
-
-    for (const baseDimension of BASE_DIMENSIONS) {
-      const poweredExponent = getExponent(vector, baseDimension) * normalizedExponent;
-      if (poweredExponent !== 0) {
-        result[baseDimension] = poweredExponent;
-      }
-    }
-
-    return createDimensionVector(result);
+    return powDimensions(vector, exponent);
   },
 
   equals(left: DimensionVector, right: DimensionVector): boolean {
-    for (const baseDimension of BASE_DIMENSIONS) {
-      if (getExponent(left, baseDimension) !== getExponent(right, baseDimension)) {
-        return false;
-      }
-    }
-
-    return true;
+    return areDimensionsEqual(left, right);
   },
 } as const;
 
