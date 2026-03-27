@@ -31,6 +31,12 @@ interface HistoryEntry {
   readonly result: string;
 }
 
+interface UnitCategory {
+  readonly key: string;
+  readonly label: string;
+  readonly units: readonly string[];
+}
+
 const mainPadButtons: readonly PadButton[] = [
   { label: 'C', action: 'clear', variant: 'danger' },
   { label: 'DEL', action: 'del', variant: 'operator' },
@@ -57,10 +63,24 @@ const mainPadButtons: readonly PadButton[] = [
   { label: '.', tokenType: 'number', tokenValue: '.' },
   { label: '+', tokenType: 'operator', tokenValue: '+', variant: 'operator' },
 
-  { label: 'm', tokenType: 'unit', tokenValue: 'm', variant: 'operator' },
-  { label: 'km', tokenType: 'unit', tokenValue: 'km', variant: 'operator' },
-  { label: 's', tokenType: 'unit', tokenValue: 's', variant: 'operator' },
+  { label: '^', tokenType: 'power', tokenValue: '^', variant: 'operator' },
+  { label: '%', tokenType: 'operator', tokenValue: '%', variant: 'operator' },
+  { label: 'π', tokenType: 'number', tokenValue: '3.14159', variant: 'operator' },
   { label: '=', action: 'equals', variant: 'accent' },
+];
+
+const SI_UNIT_CATEGORIES: readonly UnitCategory[] = [
+  { key: 'length', label: 'Length', units: ['mm', 'cm', 'm', 'km'] },
+  { key: 'mass', label: 'Mass', units: ['mg', 'g', 'kg', 't'] },
+  { key: 'time', label: 'Time', units: ['ms', 's', 'min', 'h'] },
+  { key: 'temp', label: 'Temperature', units: ['°C', 'K'] },
+];
+
+const US_UNIT_CATEGORIES: readonly UnitCategory[] = [
+  { key: 'length', label: 'Length', units: ['in', 'ft', 'yd', 'mi'] },
+  { key: 'mass', label: 'Mass', units: ['oz', 'lb', 'ton'] },
+  { key: 'time', label: 'Time', units: ['s', 'min', 'h', 'day'] },
+  { key: 'temp', label: 'Temperature', units: ['°F'] },
 ];
 
 const tokenSpacingNeeded = (
@@ -96,8 +116,15 @@ export const HomeScreen = () => {
   const [unitMode, setUnitMode] = useState<UnitMode>('SI');
   const [historyVisible, setHistoryVisible] = useState(false);
   const [historyEntries, setHistoryEntries] = useState<readonly HistoryEntry[]>([]);
+  const [unitOverlayVisible, setUnitOverlayVisible] = useState(false);
+  const [recentUnits, setRecentUnits] = useState<readonly string[]>([]);
 
   const inputPreview = useMemo(() => formatTokens(tokens), [tokens]);
+  const unitCategories = unitMode === 'SI' ? SI_UNIT_CATEGORIES : US_UNIT_CATEGORIES;
+
+  const trackRecentUnit = (unit: string): void => {
+    setRecentUnits(previous => [unit, ...previous.filter(item => item !== unit)].slice(0, 4));
+  };
 
   const pushToken = (tokenType: TokenType, value: string): void => {
     const nextToken: InputToken = {
@@ -107,6 +134,10 @@ export const HomeScreen = () => {
     };
 
     setTokens(previous => [...previous, nextToken]);
+
+    if (tokenType === 'unit') {
+      trackRecentUnit(value);
+    }
   };
 
   const removeLastToken = (): void => {
@@ -177,12 +208,32 @@ export const HomeScreen = () => {
       <View style={styles.topBar}>
         <Text style={styles.brand}>Unit Calculator</Text>
 
-        <Pressable
-          style={({ pressed }) => [styles.historyButton, pressed && styles.scaleDown]}
-          onPress={() => setHistoryVisible(previous => !previous)}
-        >
-          <Text style={styles.historyButtonLabel}>History</Text>
-        </Pressable>
+        <View style={styles.topBarActions}>
+          <Pressable
+            style={({ pressed }) => [
+              styles.historyButton,
+              unitOverlayVisible && styles.historyButtonActive,
+              pressed && styles.scaleDown,
+            ]}
+            onPress={() => setUnitOverlayVisible(previous => !previous)}
+          >
+            <Text
+              style={[
+                styles.historyButtonLabel,
+                unitOverlayVisible && styles.historyButtonLabelActive,
+              ]}
+            >
+              Units
+            </Text>
+          </Pressable>
+
+          <Pressable
+            style={({ pressed }) => [styles.historyButton, pressed && styles.scaleDown]}
+            onPress={() => setHistoryVisible(previous => !previous)}
+          >
+            <Text style={styles.historyButtonLabel}>History</Text>
+          </Pressable>
+        </View>
       </View>
 
       <View style={styles.unitToggleRow}>
@@ -218,6 +269,25 @@ export const HomeScreen = () => {
         </Text>
       </View>
 
+      <View style={styles.quickBar}>
+        <Text style={styles.quickBarLabel}>Quick units</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+          {recentUnits.length === 0 ? (
+            <Text style={styles.quickBarEmpty}>No recent units</Text>
+          ) : (
+            recentUnits.map(unit => (
+              <Pressable
+                key={unit}
+                style={({ pressed }) => [styles.quickUnitChip, pressed && styles.scaleDown]}
+                onPress={() => pushToken('unit', unit)}
+              >
+                <Text style={styles.quickUnitChipLabel}>{unit}</Text>
+              </Pressable>
+            ))
+          )}
+        </ScrollView>
+      </View>
+
       {historyVisible && (
         <View style={styles.historyPanel}>
           <Text style={styles.historyTitle}>Recent</Text>
@@ -240,11 +310,35 @@ export const HomeScreen = () => {
         </View>
       )}
 
-      <View style={styles.keypadGrid}>
-        {mainPadButtons.map(button => (
-          <PadKey key={button.label} button={button} onPress={handleButtonPress} />
-        ))}
-      </View>
+      {unitOverlayVisible ? (
+        <ScrollView style={styles.unitOverlay} contentContainerStyle={styles.unitOverlayContent}>
+          {unitCategories.map(category => (
+            <View key={category.key} style={styles.unitCategorySection}>
+              <Text style={styles.unitCategoryTitle}>{category.label}</Text>
+              <View style={styles.unitChipRow}>
+                {category.units.map(unit => (
+                  <Pressable
+                    key={unit}
+                    style={({ pressed }) => [
+                      styles.unitChip,
+                      pressed && styles.scaleDown,
+                    ]}
+                    onPress={() => pushToken('unit', unit)}
+                  >
+                    <Text style={styles.unitChipLabel}>{unit}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+          ))}
+        </ScrollView>
+      ) : (
+        <View style={styles.keypadGrid}>
+          {mainPadButtons.map(button => (
+            <PadKey key={button.label} button={button} onPress={handleButtonPress} />
+          ))}
+        </View>
+      )}
     </View>
   );
 };
@@ -295,6 +389,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 10,
   },
+  topBarActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
   brand: {
     fontSize: 22,
     fontWeight: '700',
@@ -306,10 +404,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 8,
   },
+  historyButtonActive: {
+    backgroundColor: '#2563eb',
+  },
   historyButtonLabel: {
     fontSize: 13,
     fontWeight: '600',
     color: '#374151',
+  },
+  historyButtonLabelActive: {
+    color: '#ffffff',
   },
   unitToggleRow: {
     flexDirection: 'row',
@@ -340,7 +444,7 @@ const styles = StyleSheet.create({
     paddingVertical: 24,
     paddingHorizontal: 18,
     marginBottom: 12,
-    minHeight: 150,
+    minHeight: 140,
     justifyContent: 'space-between',
   },
   expressionText: {
@@ -356,6 +460,35 @@ const styles = StyleSheet.create({
     fontSize: 34,
     fontWeight: '700',
     minHeight: 44,
+  },
+  quickBar: {
+    borderRadius: 16,
+    backgroundColor: '#ffffff',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    marginBottom: 12,
+  },
+  quickBarLabel: {
+    fontSize: 12,
+    color: '#6b7280',
+    marginBottom: 8,
+    fontWeight: '600',
+  },
+  quickBarEmpty: {
+    fontSize: 13,
+    color: '#9ca3af',
+  },
+  quickUnitChip: {
+    borderRadius: 14,
+    backgroundColor: '#dbeafe',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginRight: 8,
+  },
+  quickUnitChipLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#1d4ed8',
   },
   historyPanel: {
     borderRadius: 20,
@@ -391,6 +524,41 @@ const styles = StyleSheet.create({
     color: '#111827',
     fontWeight: '600',
   },
+  unitOverlay: {
+    flex: 1,
+    backgroundColor: '#ffffff',
+    borderRadius: 20,
+  },
+  unitOverlayContent: {
+    padding: 14,
+  },
+  unitCategorySection: {
+    marginBottom: 16,
+  },
+  unitCategoryTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#374151',
+    marginBottom: 8,
+  },
+  unitChipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  unitChip: {
+    borderRadius: 16,
+    backgroundColor: '#e5e7eb',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    minWidth: 56,
+    alignItems: 'center',
+  },
+  unitChipLabel: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#1f2937',
+  },
   keypadGrid: {
     flex: 1,
     flexDirection: 'row',
@@ -400,7 +568,7 @@ const styles = StyleSheet.create({
   },
   key: {
     width: '23%',
-    minHeight: 60,
+    minHeight: 58,
     borderRadius: 20,
     backgroundColor: '#ffffff',
     alignItems: 'center',
