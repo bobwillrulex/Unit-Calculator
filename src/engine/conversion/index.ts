@@ -1,4 +1,5 @@
 import type { ParsedExpression } from '../../parser';
+import { formatUnitWithSuperscripts } from '../../utils';
 import {
   DEFAULT_UNIT_REGISTRY,
   DIMENSIONLESS,
@@ -257,7 +258,7 @@ export const createConversionEngine = (): ConversionEngine => ({
 
     return {
       value: convertBaseValueToDisplay(request.quantityInBaseUnits.valueInBaseUnits, request.to),
-      unitSymbol: request.to.symbol,
+      unitSymbol: formatUnitWithSuperscripts(request.to.symbol),
     };
   },
 });
