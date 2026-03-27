@@ -11,48 +11,43 @@ export interface Token {
   readonly lexeme: string;
   readonly position: number;
   readonly value?: number;
-  readonly operator?: BinaryOperator;
+  readonly operator?: BinaryOperator | '^';
 }
 
 export interface Tokenizer {
   tokenize(input: string): ReadonlyArray<Token>;
 }
 
-export type BinaryOperator = '+' | '-' | '*' | '/' | '^';
+export type BinaryOperator = '+' | '-' | '*' | '/';
 
 export type ExpressionNode =
   | NumberNode
-  | UnitSymbolNode
-  | UnaryNode
-  | BinaryNode
-  | GroupNode;
+  | UnitNode
+  | BinaryExpression
+  | PowerExpression;
 
 export interface NumberNode {
   readonly kind: 'number';
   readonly value: number;
 }
 
-export interface UnitSymbolNode {
-  readonly kind: 'unit-symbol';
+export interface UnitNode {
+  readonly kind: 'unit';
   readonly symbol: string;
 }
 
-export interface UnaryNode {
-  readonly kind: 'unary';
-  readonly operator: '+' | '-';
-  readonly operand: ExpressionNode;
-}
-
-export interface BinaryNode {
-  readonly kind: 'binary';
+export interface BinaryExpression {
+  readonly kind: 'binary-expression';
   readonly operator: BinaryOperator;
   readonly left: ExpressionNode;
   readonly right: ExpressionNode;
 }
 
-export interface GroupNode {
-  readonly kind: 'group';
-  readonly expression: ExpressionNode;
+export interface PowerExpression {
+  readonly kind: 'power-expression';
+  readonly base: ExpressionNode;
+  readonly exponent: ExpressionNode;
+  readonly exponentType: 'number' | 'unit';
 }
 
 export interface ParsedExpression {
@@ -138,7 +133,7 @@ export class DefaultTokenizer implements Tokenizer {
           type: 'operator',
           lexeme: char,
           position: index,
-          operator: char as BinaryOperator,
+          operator: char as '^' | BinaryOperator,
         });
         index += 1;
         continue;
@@ -177,4 +172,188 @@ export class DefaultTokenizer implements Tokenizer {
   }
 }
 
+class DefaultExpressionParser implements ExpressionParser {
+  parse(input: string): ParsedExpression {
+    const tokens = tokenizer.tokenize(input);
+    const state = { tokens, current: 0 };
+    const ast = this.parseAdditive(state);
+
+    if (!this.isAtEnd(state)) {
+      const token = this.peek(state);
+      throw new Error(`Unexpected token "${token.lexeme}" at position ${token.position}.`);
+    }
+
+    return { raw: input, ast, tokens };
+  }
+
+  private parseAdditive(state: ParseState): ExpressionNode {
+    let expression = this.parseMultiplicative(state);
+
+    while (
+      this.matchOperator(state, '+') ||
+      this.matchOperator(state, '-')
+    ) {
+      const operator = this.previous(state).lexeme as BinaryOperator;
+      const right = this.parseMultiplicative(state);
+      expression = {
+        kind: 'binary-expression',
+        operator,
+        left: expression,
+        right,
+      };
+    }
+
+    return expression;
+  }
+
+  private parseMultiplicative(state: ParseState): ExpressionNode {
+    let expression = this.parsePower(state);
+
+    while (true) {
+      if (this.matchOperator(state, '*') || this.matchOperator(state, '/')) {
+        const operator = this.previous(state).lexeme as BinaryOperator;
+        const right = this.parsePower(state);
+        expression = {
+          kind: 'binary-expression',
+          operator,
+          left: expression,
+          right,
+        };
+        continue;
+      }
+
+      if (this.isImplicitMultiplicationStart(this.peek(state))) {
+        const right = this.parsePower(state);
+        expression = {
+          kind: 'binary-expression',
+          operator: '*',
+          left: expression,
+          right,
+        };
+        continue;
+      }
+
+      break;
+    }
+
+    return expression;
+  }
+
+  private parsePower(state: ParseState): ExpressionNode {
+    const base = this.parsePrimary(state);
+
+    if (!this.matchOperator(state, '^')) {
+      return base;
+    }
+
+    const exponent = this.parsePower(state);
+    return {
+      kind: 'power-expression',
+      base,
+      exponent,
+      exponentType: this.getExponentType(base),
+    };
+  }
+
+  private parsePrimary(state: ParseState): ExpressionNode {
+    if (this.matchType(state, 'number')) {
+      const token = this.previous(state);
+      return {
+        kind: 'number',
+        value: token.value ?? Number.NaN,
+      };
+    }
+
+    if (this.matchType(state, 'unit')) {
+      const token = this.previous(state);
+      return {
+        kind: 'unit',
+        symbol: token.lexeme,
+      };
+    }
+
+    if (this.matchType(state, 'lparen')) {
+      const expression = this.parseAdditive(state);
+      this.consumeType(state, 'rparen', 'Expected ")" after grouped expression.');
+      return expression;
+    }
+
+    const token = this.peek(state);
+    throw new Error(`Expected expression at position ${token.position}.`);
+  }
+
+  private getExponentType(base: ExpressionNode): 'number' | 'unit' {
+    return base.kind === 'unit' ? 'unit' : 'number';
+  }
+
+  private matchOperator(state: ParseState, operator: string): boolean {
+    if (!this.check(state, 'operator')) {
+      return false;
+    }
+
+    if (this.peek(state).lexeme !== operator) {
+      return false;
+    }
+
+    this.advance(state);
+    return true;
+  }
+
+  private matchType(state: ParseState, type: TokenType): boolean {
+    if (!this.check(state, type)) {
+      return false;
+    }
+
+    this.advance(state);
+    return true;
+  }
+
+  private consumeType(state: ParseState, type: TokenType, message: string): Token {
+    if (this.check(state, type)) {
+      return this.advance(state);
+    }
+
+    const token = this.peek(state);
+    throw new Error(`${message} Found "${token.lexeme}" at position ${token.position}.`);
+  }
+
+  private isImplicitMultiplicationStart(token: Token): boolean {
+    return token.type === 'number' || token.type === 'unit' || token.type === 'lparen';
+  }
+
+  private check(state: ParseState, type: TokenType): boolean {
+    if (this.isAtEnd(state)) {
+      return false;
+    }
+
+    return this.peek(state).type === type;
+  }
+
+  private advance(state: ParseState): Token {
+    if (!this.isAtEnd(state)) {
+      state.current += 1;
+    }
+
+    return this.previous(state);
+  }
+
+  private isAtEnd(state: ParseState): boolean {
+    return this.peek(state).type === 'eof';
+  }
+
+  private peek(state: ParseState): Token {
+    return state.tokens[state.current];
+  }
+
+  private previous(state: ParseState): Token {
+    return state.tokens[state.current - 1];
+  }
+}
+
+interface ParseState {
+  readonly tokens: ReadonlyArray<Token>;
+  current: number;
+}
+
 export const tokenizer: Tokenizer = new DefaultTokenizer();
+export const parser: ExpressionParser = new DefaultExpressionParser();
