@@ -7,9 +7,16 @@ import {
   powDimensions,
   type DimensionVector,
   type Quantity,
+  type Unit,
   type UnitDefinition,
   type UnitRegistry,
 } from '../units';
+
+export interface CalculatedResult {
+  readonly baseValue: number;
+  readonly dimension: DimensionVector;
+  readonly displayUnit: Unit;
+}
 
 export interface ConversionRequest {
   readonly quantityInBaseUnits: Quantity;
@@ -24,6 +31,48 @@ export interface ConversionResult {
 export interface ConversionEngine {
   convert(request: ConversionRequest): ConversionResult;
 }
+
+const convertBaseValueToDisplay = (baseValue: number, unit: Unit): number => {
+  const conversion = unit.conversion;
+
+  if (conversion.kind === 'linear') {
+    return baseValue / conversion.toBaseFactor;
+  }
+
+  return (baseValue - conversion.toBaseOffset) / conversion.toBaseFactor;
+};
+
+export const createCalculatedResult = (
+  baseQuantity: Quantity,
+  displayUnit: Unit,
+): CalculatedResult => {
+  if (!areDimensionsEqual(baseQuantity.dimension, displayUnit.dimension)) {
+    throw new Error(`Incompatible dimensions for display unit ${displayUnit.symbol}`);
+  }
+
+  return {
+    baseValue: baseQuantity.valueInBaseUnits,
+    dimension: baseQuantity.dimension,
+    displayUnit,
+  };
+};
+
+export const getDisplayValue = (result: CalculatedResult): number =>
+  convertBaseValueToDisplay(result.baseValue, result.displayUnit);
+
+export const switchDisplayUnit = (
+  result: CalculatedResult,
+  nextDisplayUnit: Unit,
+): CalculatedResult => {
+  if (!areDimensionsEqual(result.dimension, nextDisplayUnit.dimension)) {
+    throw new Error(`Incompatible dimensions for display unit ${nextDisplayUnit.symbol}`);
+  }
+
+  return {
+    ...result,
+    displayUnit: nextDisplayUnit,
+  };
+};
 
 interface ParsedUnitExpression {
   readonly dimension: DimensionVector;
@@ -192,19 +241,8 @@ export const createConversionEngine = (): ConversionEngine => ({
       );
     }
 
-    const conversion = request.to.conversion;
-
-    if (conversion.kind === 'linear') {
-      return {
-        value: request.quantityInBaseUnits.valueInBaseUnits / conversion.toBaseFactor,
-        unitSymbol: request.to.symbol,
-      };
-    }
-
     return {
-      value:
-        (request.quantityInBaseUnits.valueInBaseUnits - conversion.toBaseOffset) /
-        conversion.toBaseFactor,
+      value: convertBaseValueToDisplay(request.quantityInBaseUnits.valueInBaseUnits, request.to),
       unitSymbol: request.to.symbol,
     };
   },
