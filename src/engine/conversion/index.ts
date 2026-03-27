@@ -1,11 +1,15 @@
-import type { UnitDefinition } from '../units';
+import type { Quantity, UnitDefinition } from '../units';
 
 export interface ConversionRequest {
-  readonly value: number;
-  readonly from: UnitDefinition;
+  readonly quantityInBaseUnits: Quantity;
   readonly to: UnitDefinition;
 }
 
+export interface ConversionResult {
+  readonly value: number;
+  readonly unitSymbol: string;
+}
+
 export interface ConversionEngine {
-  convert(request: ConversionRequest): number;
+  convert(request: ConversionRequest): ConversionResult;
 }
