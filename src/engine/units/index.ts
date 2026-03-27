@@ -144,6 +144,8 @@ export interface UnitDefinition {
   readonly conversion: UnitConversion;
 }
 
+export type Unit = UnitDefinition;
+
 export type UnitRegistry = ReadonlyArray<UnitDefinition>;
 
 export interface Quantity {
