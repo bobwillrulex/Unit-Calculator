@@ -1,11 +1,5 @@
 import { useMemo, useState } from 'react';
-import {
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 type TokenType =
   | 'number'
@@ -14,6 +8,8 @@ type TokenType =
   | 'power'
   | 'unit'
   | 'answer';
+
+type UnitMode = 'SI' | 'US';
 
 interface InputToken {
   readonly id: string;
@@ -25,48 +21,46 @@ interface PadButton {
   readonly label: string;
   readonly tokenType?: TokenType;
   readonly tokenValue?: string;
-  readonly action?: 'del' | 'ans';
+  readonly action?: 'del' | 'ans' | 'clear' | 'equals';
+  readonly variant?: 'default' | 'operator' | 'accent' | 'danger';
 }
 
-const numberButtons: readonly PadButton[] = [
+interface HistoryEntry {
+  readonly id: string;
+  readonly expression: string;
+  readonly result: string;
+}
+
+const mainPadButtons: readonly PadButton[] = [
+  { label: 'C', action: 'clear', variant: 'danger' },
+  { label: 'DEL', action: 'del', variant: 'operator' },
+  { label: '(', tokenType: 'paren', tokenValue: '(', variant: 'operator' },
+  { label: ')', tokenType: 'paren', tokenValue: ')', variant: 'operator' },
+
   { label: '7', tokenType: 'number', tokenValue: '7' },
   { label: '8', tokenType: 'number', tokenValue: '8' },
   { label: '9', tokenType: 'number', tokenValue: '9' },
+  { label: '÷', tokenType: 'operator', tokenValue: '/', variant: 'operator' },
+
   { label: '4', tokenType: 'number', tokenValue: '4' },
   { label: '5', tokenType: 'number', tokenValue: '5' },
   { label: '6', tokenType: 'number', tokenValue: '6' },
+  { label: '×', tokenType: 'operator', tokenValue: '*', variant: 'operator' },
+
   { label: '1', tokenType: 'number', tokenValue: '1' },
   { label: '2', tokenType: 'number', tokenValue: '2' },
   { label: '3', tokenType: 'number', tokenValue: '3' },
+  { label: '-', tokenType: 'operator', tokenValue: '-', variant: 'operator' },
+
+  { label: 'ANS', action: 'ans', variant: 'accent' },
   { label: '0', tokenType: 'number', tokenValue: '0' },
   { label: '.', tokenType: 'number', tokenValue: '.' },
-];
+  { label: '+', tokenType: 'operator', tokenValue: '+', variant: 'operator' },
 
-const operatorButtons: readonly PadButton[] = [
-  { label: '+', tokenType: 'operator', tokenValue: '+' },
-  { label: '-', tokenType: 'operator', tokenValue: '-' },
-  { label: '×', tokenType: 'operator', tokenValue: '*' },
-  { label: '÷', tokenType: 'operator', tokenValue: '/' },
-  { label: '^', tokenType: 'power', tokenValue: '^' },
-];
-
-const parenButtons: readonly PadButton[] = [
-  { label: '(', tokenType: 'paren', tokenValue: '(' },
-  { label: ')', tokenType: 'paren', tokenValue: ')' },
-];
-
-const unitButtons: readonly PadButton[] = [
-  { label: 'm', tokenType: 'unit', tokenValue: 'm' },
-  { label: 'km', tokenType: 'unit', tokenValue: 'km' },
-  { label: 's', tokenType: 'unit', tokenValue: 's' },
-  { label: 'min', tokenType: 'unit', tokenValue: 'min' },
-  { label: 'kg', tokenType: 'unit', tokenValue: 'kg' },
-  { label: 'N', tokenType: 'unit', tokenValue: 'N' },
-];
-
-const actionButtons: readonly PadButton[] = [
-  { label: 'ANS', action: 'ans' },
-  { label: 'DEL', action: 'del' },
+  { label: 'm', tokenType: 'unit', tokenValue: 'm', variant: 'operator' },
+  { label: 'km', tokenType: 'unit', tokenValue: 'km', variant: 'operator' },
+  { label: 's', tokenType: 'unit', tokenValue: 's', variant: 'operator' },
+  { label: '=', action: 'equals', variant: 'accent' },
 ];
 
 const tokenSpacingNeeded = (
@@ -98,7 +92,10 @@ const formatTokens = (tokens: readonly InputToken[]): string => {
 
 export const HomeScreen = () => {
   const [tokens, setTokens] = useState<readonly InputToken[]>([]);
-  const [lastResult] = useState('0');
+  const [lastResult, setLastResult] = useState('0');
+  const [unitMode, setUnitMode] = useState<UnitMode>('SI');
+  const [historyVisible, setHistoryVisible] = useState(false);
+  const [historyEntries, setHistoryEntries] = useState<readonly HistoryEntry[]>([]);
 
   const inputPreview = useMemo(() => formatTokens(tokens), [tokens]);
 
@@ -116,8 +113,37 @@ export const HomeScreen = () => {
     setTokens(previous => previous.slice(0, -1));
   };
 
+  const clearAllTokens = (): void => {
+    setTokens([]);
+  };
+
   const insertAnswerToken = (): void => {
     pushToken('answer', lastResult);
+  };
+
+  const storeToHistory = (expression: string, result: string): void => {
+    const nextEntry: HistoryEntry = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      expression,
+      result,
+    };
+
+    setHistoryEntries(previous => [nextEntry, ...previous].slice(0, 8));
+  };
+
+  const resolveExpression = (): void => {
+    const expression = inputPreview;
+
+    if (expression === '0') {
+      return;
+    }
+
+    const unitTag = unitMode === 'SI' ? 'SI' : 'US';
+    const result = `${expression} (${unitTag})`;
+
+    setLastResult(result);
+    storeToHistory(expression, result);
+    setTokens([]);
   };
 
   const handleButtonPress = (button: PadButton): void => {
@@ -131,6 +157,16 @@ export const HomeScreen = () => {
       return;
     }
 
+    if (button.action === 'clear') {
+      clearAllTokens();
+      return;
+    }
+
+    if (button.action === 'equals') {
+      resolveExpression();
+      return;
+    }
+
     if (button.tokenType && button.tokenValue) {
       pushToken(button.tokenType, button.tokenValue);
     }
@@ -138,67 +174,77 @@ export const HomeScreen = () => {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Unit Calculator</Text>
+      <View style={styles.topBar}>
+        <Text style={styles.brand}>Unit Calculator</Text>
 
-      <View style={styles.displayCard}>
-        <Text style={styles.displayLabel}>Input (token-based)</Text>
-        <Text style={styles.displayValue}>{inputPreview}</Text>
-        <Text style={styles.resultLabel}>ANS = {lastResult}</Text>
+        <Pressable
+          style={({ pressed }) => [styles.historyButton, pressed && styles.scaleDown]}
+          onPress={() => setHistoryVisible(previous => !previous)}
+        >
+          <Text style={styles.historyButtonLabel}>History</Text>
+        </Pressable>
       </View>
 
-      <ScrollView style={styles.padScroll} contentContainerStyle={styles.padContent}>
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Numbers</Text>
-          <View style={styles.rowWrap}>
-            {numberButtons.map(button => (
-              <PadKey
-                key={`num-${button.label}`}
-                button={button}
-                onPress={handleButtonPress}
-              />
-            ))}
-          </View>
-        </View>
+      <View style={styles.unitToggleRow}>
+        {(['SI', 'US'] as const).map(mode => {
+          const selected = mode === unitMode;
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Operators / Parentheses / ^</Text>
-          <View style={styles.rowWrap}>
-            {[...operatorButtons, ...parenButtons].map(button => (
-              <PadKey
-                key={`op-${button.label}`}
-                button={button}
-                onPress={handleButtonPress}
-              />
-            ))}
-          </View>
-        </View>
+          return (
+            <Pressable
+              key={mode}
+              style={({ pressed }) => [
+                styles.unitToggle,
+                selected && styles.unitToggleSelected,
+                pressed && styles.scaleDown,
+              ]}
+              onPress={() => setUnitMode(mode)}
+            >
+              <Text
+                style={[styles.unitToggleLabel, selected && styles.unitToggleLabelSelected]}
+              >
+                {mode === 'SI' ? 'SI Units' : 'US Units'}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Units</Text>
-          <View style={styles.rowWrap}>
-            {unitButtons.map(button => (
-              <PadKey
-                key={`unit-${button.label}`}
-                button={button}
-                onPress={handleButtonPress}
-              />
-            ))}
-          </View>
-        </View>
+      <View style={styles.displayCard}>
+        <Text style={styles.expressionText} numberOfLines={2}>
+          {inputPreview}
+        </Text>
+        <Text style={styles.resultText} numberOfLines={2}>
+          {lastResult}
+        </Text>
+      </View>
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Actions</Text>
-          <View style={styles.rowWrap}>
-            {actionButtons.map(button => (
-              <PadKey
-                key={`action-${button.label}`}
-                button={button}
-                onPress={handleButtonPress}
-              />
-            ))}
-          </View>
+      {historyVisible && (
+        <View style={styles.historyPanel}>
+          <Text style={styles.historyTitle}>Recent</Text>
+          {historyEntries.length === 0 ? (
+            <Text style={styles.historyEmpty}>No history yet</Text>
+          ) : (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              {historyEntries.map(item => (
+                <View key={item.id} style={styles.historyChip}>
+                  <Text style={styles.historyExpression} numberOfLines={1}>
+                    {item.expression}
+                  </Text>
+                  <Text style={styles.historyResult} numberOfLines={1}>
+                    {item.result}
+                  </Text>
+                </View>
+              ))}
+            </ScrollView>
+          )}
         </View>
-      </ScrollView>
+      )}
+
+      <View style={styles.keypadGrid}>
+        {mainPadButtons.map(button => (
+          <PadKey key={button.label} button={button} onPress={handleButtonPress} />
+        ))}
+      </View>
     </View>
   );
 };
@@ -212,10 +258,25 @@ const PadKey = ({
 }) => {
   return (
     <Pressable
-      style={({ pressed }) => [styles.key, pressed && styles.keyPressed]}
+      style={({ pressed }) => [
+        styles.key,
+        button.variant === 'operator' && styles.keyOperator,
+        button.variant === 'accent' && styles.keyAccent,
+        button.variant === 'danger' && styles.keyDanger,
+        pressed && styles.scaleDown,
+      ]}
       onPress={() => onPress(button)}
     >
-      <Text style={styles.keyLabel}>{button.label}</Text>
+      <Text
+        style={[
+          styles.keyLabel,
+          button.variant === 'operator' && styles.keyLabelOperator,
+          button.variant === 'accent' && styles.keyLabelAccent,
+          button.variant === 'danger' && styles.keyLabelDanger,
+        ]}
+      >
+        {button.label}
+      </Text>
     </Pressable>
   );
 };
@@ -223,72 +284,154 @@ const PadKey = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 16,
-    backgroundColor: '#f4f7fb',
+    backgroundColor: '#f2f4f7',
+    paddingTop: 18,
+    paddingHorizontal: 16,
+    paddingBottom: 16,
   },
-  title: {
-    fontSize: 26,
+  topBar: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  brand: {
+    fontSize: 22,
     fontWeight: '700',
+    color: '#1f2937',
+  },
+  historyButton: {
+    backgroundColor: '#ffffff',
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  historyButtonLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#374151',
+  },
+  unitToggleRow: {
+    flexDirection: 'row',
+    gap: 8,
     marginBottom: 12,
-    textAlign: 'center',
+  },
+  unitToggle: {
+    flex: 1,
+    borderRadius: 16,
+    paddingVertical: 10,
+    alignItems: 'center',
+    backgroundColor: '#e5e7eb',
+  },
+  unitToggleSelected: {
+    backgroundColor: '#111827',
+  },
+  unitToggleLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#4b5563',
+  },
+  unitToggleLabelSelected: {
+    color: '#f9fafb',
   },
   displayCard: {
-    borderRadius: 12,
-    backgroundColor: '#fff',
+    borderRadius: 28,
+    backgroundColor: '#ffffff',
+    paddingVertical: 24,
+    paddingHorizontal: 18,
+    marginBottom: 12,
+    minHeight: 150,
+    justifyContent: 'space-between',
+  },
+  expressionText: {
+    textAlign: 'right',
+    color: '#6b7280',
+    fontSize: 28,
+    fontWeight: '500',
+    minHeight: 64,
+  },
+  resultText: {
+    textAlign: 'right',
+    color: '#0f172a',
+    fontSize: 34,
+    fontWeight: '700',
+    minHeight: 44,
+  },
+  historyPanel: {
+    borderRadius: 20,
+    backgroundColor: '#ffffff',
     padding: 12,
     marginBottom: 12,
   },
-  displayLabel: {
-    color: '#666',
+  historyTitle: {
     fontSize: 12,
-    marginBottom: 6,
-  },
-  displayValue: {
-    fontSize: 24,
-    fontWeight: '600',
-    minHeight: 32,
-  },
-  resultLabel: {
-    marginTop: 8,
-    fontSize: 13,
-    color: '#3d4f73',
-  },
-  padScroll: {
-    flex: 1,
-  },
-  padContent: {
-    paddingBottom: 24,
-  },
-  section: {
-    marginTop: 10,
-  },
-  sectionTitle: {
-    fontSize: 14,
-    fontWeight: '700',
+    color: '#6b7280',
     marginBottom: 8,
-    color: '#44536e',
+    fontWeight: '600',
   },
-  rowWrap: {
+  historyEmpty: {
+    fontSize: 13,
+    color: '#9ca3af',
+  },
+  historyChip: {
+    borderRadius: 16,
+    backgroundColor: '#f3f4f6',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginRight: 8,
+    minWidth: 140,
+  },
+  historyExpression: {
+    fontSize: 12,
+    color: '#6b7280',
+    marginBottom: 4,
+  },
+  historyResult: {
+    fontSize: 13,
+    color: '#111827',
+    fontWeight: '600',
+  },
+  keypadGrid: {
+    flex: 1,
     flexDirection: 'row',
     flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    alignContent: 'space-between',
   },
   key: {
-    minWidth: 56,
-    borderRadius: 10,
-    backgroundColor: '#fff',
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    marginRight: 8,
-    marginBottom: 8,
+    width: '23%',
+    minHeight: 60,
+    borderRadius: 20,
+    backgroundColor: '#ffffff',
     alignItems: 'center',
     justifyContent: 'center',
+    marginBottom: 10,
   },
-  keyPressed: {
-    backgroundColor: '#e9efff',
+  keyOperator: {
+    backgroundColor: '#e5e7eb',
+  },
+  keyAccent: {
+    backgroundColor: '#2563eb',
+  },
+  keyDanger: {
+    backgroundColor: '#fee2e2',
   },
   keyLabel: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#111827',
+  },
+  keyLabelOperator: {
+    color: '#1f2937',
+  },
+  keyLabelAccent: {
+    color: '#ffffff',
     fontWeight: '700',
-    fontSize: 16,
-    color: '#1b2a42',
+  },
+  keyLabelDanger: {
+    color: '#b91c1c',
+  },
+  scaleDown: {
+    transform: [{ scale: 0.96 }],
   },
 });
