@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 type TokenType =
   | 'number'
@@ -35,6 +35,13 @@ interface UnitCategory {
   readonly key: string;
   readonly label: string;
   readonly units: readonly string[];
+}
+
+interface UnitSpec {
+  readonly symbol: string;
+  readonly category: string;
+  readonly toBase: (value: number) => number;
+  readonly fromBase: (value: number) => number;
 }
 
 const mainPadButtons: readonly PadButton[] = [
@@ -83,6 +90,39 @@ const US_UNIT_CATEGORIES: readonly UnitCategory[] = [
   { key: 'temp', label: 'Temperature', units: ['°F'] },
 ];
 
+const UNIT_SPECS: Record<string, UnitSpec> = {
+  mm: { symbol: 'mm', category: 'length', toBase: value => value / 1000, fromBase: value => value * 1000 },
+  cm: { symbol: 'cm', category: 'length', toBase: value => value / 100, fromBase: value => value * 100 },
+  m: { symbol: 'm', category: 'length', toBase: value => value, fromBase: value => value },
+  km: { symbol: 'km', category: 'length', toBase: value => value * 1000, fromBase: value => value / 1000 },
+  in: { symbol: 'in', category: 'length', toBase: value => value * 0.0254, fromBase: value => value / 0.0254 },
+  ft: { symbol: 'ft', category: 'length', toBase: value => value * 0.3048, fromBase: value => value / 0.3048 },
+  yd: { symbol: 'yd', category: 'length', toBase: value => value * 0.9144, fromBase: value => value / 0.9144 },
+  mi: { symbol: 'mi', category: 'length', toBase: value => value * 1609.344, fromBase: value => value / 1609.344 },
+  mg: { symbol: 'mg', category: 'mass', toBase: value => value / 1000, fromBase: value => value * 1000 },
+  g: { symbol: 'g', category: 'mass', toBase: value => value, fromBase: value => value },
+  kg: { symbol: 'kg', category: 'mass', toBase: value => value * 1000, fromBase: value => value / 1000 },
+  t: { symbol: 't', category: 'mass', toBase: value => value * 1_000_000, fromBase: value => value / 1_000_000 },
+  oz: { symbol: 'oz', category: 'mass', toBase: value => value * 28.349523125, fromBase: value => value / 28.349523125 },
+  lb: { symbol: 'lb', category: 'mass', toBase: value => value * 453.59237, fromBase: value => value / 453.59237 },
+  ton: { symbol: 'ton', category: 'mass', toBase: value => value * 907184.74, fromBase: value => value / 907184.74 },
+  ms: { symbol: 'ms', category: 'time', toBase: value => value / 1000, fromBase: value => value * 1000 },
+  s: { symbol: 's', category: 'time', toBase: value => value, fromBase: value => value },
+  min: { symbol: 'min', category: 'time', toBase: value => value * 60, fromBase: value => value / 60 },
+  h: { symbol: 'h', category: 'time', toBase: value => value * 3600, fromBase: value => value / 3600 },
+  day: { symbol: 'day', category: 'time', toBase: value => value * 86400, fromBase: value => value / 86400 },
+  '°C': { symbol: '°C', category: 'temp', toBase: value => value + 273.15, fromBase: value => value - 273.15 },
+  K: { symbol: 'K', category: 'temp', toBase: value => value, fromBase: value => value },
+  '°F': { symbol: '°F', category: 'temp', toBase: value => (value - 32) * (5 / 9) + 273.15, fromBase: value => (value - 273.15) * (9 / 5) + 32 },
+};
+
+const ALL_UNIT_CATEGORIES: readonly UnitCategory[] = [
+  { key: 'length', label: 'Length', units: ['mm', 'cm', 'm', 'km', 'in', 'ft', 'yd', 'mi'] },
+  { key: 'mass', label: 'Mass', units: ['mg', 'g', 'kg', 't', 'oz', 'lb', 'ton'] },
+  { key: 'time', label: 'Time', units: ['ms', 's', 'min', 'h', 'day'] },
+  { key: 'temp', label: 'Temperature', units: ['°C', 'K', '°F'] },
+];
+
 const tokenSpacingNeeded = (
   previous: InputToken | undefined,
   current: InputToken,
@@ -118,12 +158,100 @@ export const HomeScreen = () => {
   const [historyEntries, setHistoryEntries] = useState<readonly HistoryEntry[]>([]);
   const [unitOverlayVisible, setUnitOverlayVisible] = useState(false);
   const [recentUnits, setRecentUnits] = useState<readonly string[]>([]);
+  const [selectedUnitTokenId, setSelectedUnitTokenId] = useState<string | null>(null);
 
   const inputPreview = useMemo(() => formatTokens(tokens), [tokens]);
   const unitCategories = unitMode === 'SI' ? SI_UNIT_CATEGORIES : US_UNIT_CATEGORIES;
 
   const trackRecentUnit = (unit: string): void => {
     setRecentUnits(previous => [unit, ...previous.filter(item => item !== unit)].slice(0, 4));
+  };
+
+  const selectedUnitToken = useMemo(
+    () => tokens.find(token => token.id === selectedUnitTokenId && token.type === 'unit'),
+    [selectedUnitTokenId, tokens],
+  );
+
+  const selectedUnitSpec = selectedUnitToken ? UNIT_SPECS[selectedUnitToken.value] : undefined;
+  const compatibleUnits = useMemo(() => {
+    if (!selectedUnitSpec) {
+      return [];
+    }
+
+    const category = ALL_UNIT_CATEGORIES.find(item => item.key === selectedUnitSpec.category);
+    if (!category) {
+      return [];
+    }
+
+    return category.units.filter(unit => unit !== selectedUnitSpec.symbol);
+  }, [selectedUnitSpec]);
+
+  const formatConvertedValue = (value: number): string => {
+    if (!Number.isFinite(value)) {
+      return '0';
+    }
+
+    const absolute = Math.abs(value);
+    if (absolute >= 1000000 || (absolute > 0 && absolute < 0.0001)) {
+      return value.toExponential(4);
+    }
+
+    return Number(value.toFixed(6)).toString();
+  };
+
+  const extractValueBeforeUnit = (allTokens: readonly InputToken[], unitTokenId: string): number | null => {
+    const unitIndex = allTokens.findIndex(token => token.id === unitTokenId);
+    if (unitIndex <= 0) {
+      return null;
+    }
+
+    const valueTokens: string[] = [];
+    for (let index = unitIndex - 1; index >= 0; index -= 1) {
+      const token = allTokens[index];
+      if (token.type === 'number') {
+        valueTokens.unshift(token.value);
+        continue;
+      }
+
+      if (token.type === 'answer') {
+        const answerValue = Number.parseFloat(token.value);
+        return Number.isNaN(answerValue) ? null : answerValue;
+      }
+
+      break;
+    }
+
+    if (valueTokens.length === 0) {
+      return null;
+    }
+
+    const parsed = Number.parseFloat(valueTokens.join(''));
+    return Number.isNaN(parsed) ? null : parsed;
+  };
+
+  const replaceSelectedUnit = (nextUnit: string): void => {
+    if (!selectedUnitToken || !selectedUnitSpec) {
+      return;
+    }
+
+    const nextSpec = UNIT_SPECS[nextUnit];
+    if (!nextSpec) {
+      return;
+    }
+
+    const sourceValue = extractValueBeforeUnit(tokens, selectedUnitToken.id);
+    if (sourceValue !== null) {
+      const converted = nextSpec.fromBase(selectedUnitSpec.toBase(sourceValue));
+      setLastResult(`${formatConvertedValue(converted)} ${nextUnit}`);
+    }
+
+    setTokens(previous =>
+      previous.map(token =>
+        token.id === selectedUnitToken.id ? { ...token, value: nextUnit } : token,
+      ),
+    );
+    trackRecentUnit(nextUnit);
+    setSelectedUnitTokenId(null);
   };
 
   const pushToken = (tokenType: TokenType, value: string): void => {
@@ -261,9 +389,41 @@ export const HomeScreen = () => {
       </View>
 
       <View style={styles.displayCard}>
-        <Text style={styles.expressionText} numberOfLines={2}>
-          {inputPreview}
-        </Text>
+        <View style={styles.expressionWrap}>
+          {tokens.length === 0 ? (
+            <Text style={styles.expressionText}>0</Text>
+          ) : (
+            tokens.map((token, index) => {
+              const previous = tokens[index - 1];
+              const withSpace = tokenSpacingNeeded(previous, token);
+
+              if (token.type !== 'unit') {
+                return (
+                  <Text key={token.id} style={styles.expressionText}>
+                    {`${withSpace ? ' ' : ''}${token.value}`}
+                  </Text>
+                );
+              }
+
+              const selected = selectedUnitTokenId === token.id;
+              return (
+                <Pressable
+                  key={token.id}
+                  style={({ pressed }) => [
+                    styles.unitTokenChip,
+                    selected && styles.unitTokenChipSelected,
+                    pressed && styles.scaleDown,
+                  ]}
+                  onPress={() => setSelectedUnitTokenId(token.id)}
+                >
+                  <Text style={[styles.unitTokenChipLabel, selected && styles.unitTokenChipLabelSelected]}>
+                    {`${withSpace ? ' ' : ''}${token.value}`}
+                  </Text>
+                </Pressable>
+              );
+            })
+          )}
+        </View>
         <Text style={styles.resultText} numberOfLines={2}>
           {lastResult}
         </Text>
@@ -339,6 +499,35 @@ export const HomeScreen = () => {
           ))}
         </View>
       )}
+
+      <Modal
+        animationType="slide"
+        transparent
+        visible={Boolean(selectedUnitToken)}
+        onRequestClose={() => setSelectedUnitTokenId(null)}
+      >
+        <Pressable style={styles.sheetBackdrop} onPress={() => setSelectedUnitTokenId(null)}>
+          <Pressable style={styles.bottomSheet} onPress={() => undefined}>
+            <View style={styles.sheetHandle} />
+            <Text style={styles.sheetTitle}>Compatible units</Text>
+            <Text style={styles.sheetSubtitle}>
+              {selectedUnitToken ? `Convert ${selectedUnitToken.value} to` : ''}
+            </Text>
+
+            <View style={styles.sheetUnitsGrid}>
+              {compatibleUnits.map(unit => (
+                <Pressable
+                  key={unit}
+                  style={({ pressed }) => [styles.sheetUnitChip, pressed && styles.scaleDown]}
+                  onPress={() => replaceSelectedUnit(unit)}
+                >
+                  <Text style={styles.sheetUnitChipLabel}>{unit}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 };
@@ -447,12 +636,18 @@ const styles = StyleSheet.create({
     minHeight: 140,
     justifyContent: 'space-between',
   },
+  expressionWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    minHeight: 64,
+    rowGap: 4,
+  },
   expressionText: {
-    textAlign: 'right',
     color: '#6b7280',
     fontSize: 28,
     fontWeight: '500',
-    minHeight: 64,
   },
   resultText: {
     textAlign: 'right',
@@ -601,5 +796,74 @@ const styles = StyleSheet.create({
   },
   scaleDown: {
     transform: [{ scale: 0.96 }],
+  },
+  unitTokenChip: {
+    borderRadius: 10,
+    backgroundColor: '#dbeafe',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    marginLeft: 4,
+  },
+  unitTokenChipSelected: {
+    backgroundColor: '#2563eb',
+  },
+  unitTokenChipLabel: {
+    color: '#1e40af',
+    fontWeight: '700',
+    fontSize: 26,
+  },
+  unitTokenChipLabelSelected: {
+    color: '#ffffff',
+  },
+  sheetBackdrop: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(15, 23, 42, 0.3)',
+  },
+  bottomSheet: {
+    backgroundColor: '#ffffff',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 22,
+    minHeight: 220,
+  },
+  sheetHandle: {
+    width: 42,
+    height: 4,
+    borderRadius: 999,
+    backgroundColor: '#d1d5db',
+    alignSelf: 'center',
+    marginBottom: 10,
+  },
+  sheetTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  sheetSubtitle: {
+    fontSize: 13,
+    color: '#6b7280',
+    marginTop: 4,
+    marginBottom: 12,
+  },
+  sheetUnitsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  sheetUnitChip: {
+    borderRadius: 14,
+    backgroundColor: '#f3f4f6',
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    minWidth: 58,
+    alignItems: 'center',
+  },
+  sheetUnitChipLabel: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#1f2937',
   },
 });
