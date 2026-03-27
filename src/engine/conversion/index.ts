@@ -1,3 +1,4 @@
+import type { ParsedExpression } from '../../parser';
 import {
   DEFAULT_UNIT_REGISTRY,
   DIMENSIONLESS,
@@ -231,6 +232,19 @@ export const convert = (
 
   const valueInBaseUnits = fromExpression.toBase(value);
   return toExpression.fromBase(valueInBaseUnits);
+};
+
+export const getDefaultDisplayUnitForExpression = (
+  parsedExpression: ParsedExpression,
+  units: UnitRegistry = DEFAULT_UNIT_REGISTRY,
+): UnitDefinition | undefined => {
+  const firstUnitToken = parsedExpression.tokens.find((token) => token.type === 'unit');
+
+  if (!firstUnitToken) {
+    return undefined;
+  }
+
+  return getUnitByToken(firstUnitToken.lexeme, units);
 };
 
 export const createConversionEngine = (): ConversionEngine => ({
