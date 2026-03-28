@@ -74,7 +74,7 @@ const mainPadButtons: readonly PadButton[] = [
   { label: '3', tokenType: 'number', tokenValue: '3' },
   { label: '-', tokenType: 'operator', tokenValue: '-', variant: 'operator' },
 
-  { label: 'ANS', action: 'ans', variant: 'accent' },
+  { label: 'ANS', action: 'ans' },
   { label: '0', tokenType: 'number', tokenValue: '0' },
   { label: '.', tokenType: 'number', tokenValue: '.' },
   { label: '+', tokenType: 'operator', tokenValue: '+', variant: 'operator' },
@@ -373,8 +373,6 @@ export const HomeScreen = () => {
   return (
     <View style={styles.container}>
       <View style={styles.topBar}>
-        <Text style={styles.brand}>Unit Calculator</Text>
-
         <View style={styles.topBarActions}>
           <Pressable
             style={({ pressed }) => [
@@ -578,18 +576,13 @@ const styles = StyleSheet.create({
   },
   topBar: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-end',
     alignItems: 'center',
     marginBottom: 10,
   },
   topBarActions: {
     flexDirection: 'row',
     gap: 8,
-  },
-  brand: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#1f2937',
   },
   historyButton: {
     backgroundColor: '#ffffff',
