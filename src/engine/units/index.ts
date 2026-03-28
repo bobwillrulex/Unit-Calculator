@@ -220,6 +220,10 @@ export const UNIT_DEFINITIONS = {
     createDimensionVector({ L: 1 }),
     1000,
   ),
+  inch: createLinearUnit('inch', 'Inch', 'in', 'length', createDimensionVector({ L: 1 }), 0.0254),
+  foot: createLinearUnit('foot', 'Foot', 'ft', 'length', createDimensionVector({ L: 1 }), 0.3048),
+  yard: createLinearUnit('yard', 'Yard', 'yd', 'length', createDimensionVector({ L: 1 }), 0.9144),
+  mile: createLinearUnit('mile', 'Mile', 'mi', 'length', createDimensionVector({ L: 1 }), 1609.344),
 
   // Volume (base: liter)
   liter: createLinearUnit('liter', 'Liter', 'L', 'volume', createDimensionVector({ V: 1 }), 1),
@@ -234,8 +238,18 @@ export const UNIT_DEFINITIONS = {
 
   // Time (base: second)
   second: createLinearUnit('second', 'Second', 's', 'time', createDimensionVector({ T: 1 }), 1),
+  millisecond: createLinearUnit(
+    'millisecond',
+    'Millisecond',
+    'ms',
+    'time',
+    createDimensionVector({ T: 1 }),
+    0.001,
+  ),
   minute: createLinearUnit('minute', 'Minute', 'min', 'time', createDimensionVector({ T: 1 }), 60),
   hour: createLinearUnit('hour', 'Hour', 'hr', 'time', createDimensionVector({ T: 1 }), 3600),
+  hourShort: createLinearUnit('hour-short', 'Hour', 'h', 'time', createDimensionVector({ T: 1 }), 3600),
+  day: createLinearUnit('day', 'Day', 'day', 'time', createDimensionVector({ T: 1 }), 86400),
 
   // Temperature (base: kelvin) - requires affine conversion
   celsius: createAffineUnit(
