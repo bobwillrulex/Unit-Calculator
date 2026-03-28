@@ -2,7 +2,12 @@ import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { parser } from '../parser';
 import { expressionEvaluator } from '../engine/evaluation';
-import { DEFAULT_UNIT_REGISTRY, BASE_DIMENSIONS, type UnitDefinition } from '../engine/units';
+import {
+  DEFAULT_UNIT_REGISTRY,
+  BASE_DIMENSIONS,
+  type DimensionVector,
+  type UnitDefinition,
+} from '../engine/units';
 import { formatUnitWithSuperscripts } from '../utils';
 
 type TokenType =
@@ -14,6 +19,7 @@ type TokenType =
   | 'answer';
 
 type UnitMode = 'SI' | 'US';
+type BottomSheetMode = 'inputUnits' | 'answerUnits' | null;
 
 interface InputToken {
   readonly id: string;
@@ -39,6 +45,13 @@ interface UnitCategory {
   readonly key: string;
   readonly label: string;
   readonly units: readonly string[];
+}
+
+interface ResolvedAnswer {
+  readonly value: number;
+  readonly dimension: DimensionVector;
+  readonly preferredUnitId: string | null;
+  readonly preferredPower: number | null;
 }
 
 const mainPadButtons: readonly PadButton[] = [
@@ -117,68 +130,152 @@ const formatTokens = (tokens: readonly InputToken[]): string => {
 const findUnitByToken = (token: string): UnitDefinition | undefined =>
   DEFAULT_UNIT_REGISTRY.find((unit) => unit.symbol === token || unit.id === token);
 
-const formatComputedResult = (expression: string): string => {
-  const parsed = parser.parse(expression);
-  const evaluation = expressionEvaluator.evaluate(parsed, { units: DEFAULT_UNIT_REGISTRY });
-  const firstUnitToken = parsed.tokens.find((token) => token.type === 'unit');
-
-  if (!firstUnitToken) {
-    return Number(evaluation.value.toPrecision(12)).toString();
-  }
-
-  const displayUnit = findUnitByToken(firstUnitToken.lexeme);
-  if (!displayUnit || displayUnit.conversion.kind !== 'linear') {
-    return Number(evaluation.value.toPrecision(12)).toString();
-  }
-
+const derivePowerForUnit = (
+  unit: UnitDefinition,
+  resultDimension: DimensionVector,
+): number | null => {
   let power: number | null = null;
 
   for (const baseDimension of BASE_DIMENSIONS) {
-    const baseExponent = displayUnit.dimension[baseDimension] ?? 0;
-    const resultExponent = evaluation.dimension[baseDimension] ?? 0;
+    const baseExponent = unit.dimension[baseDimension] ?? 0;
+    const resultExponent = resultDimension[baseDimension] ?? 0;
 
     if (baseExponent === 0 && resultExponent === 0) {
       continue;
     }
 
     if (baseExponent === 0 || resultExponent % baseExponent !== 0) {
-      power = null;
-      break;
+      return null;
     }
 
     const candidatePower = resultExponent / baseExponent;
     if (power === null) {
       power = candidatePower;
     } else if (power !== candidatePower) {
-      power = null;
-      break;
+      return null;
     }
   }
 
-  if (power === null || power === 0) {
-    return Number(evaluation.value.toPrecision(12)).toString();
+  return power;
+};
+
+const isCompatibleWithAnswer = (
+  unit: UnitDefinition,
+  answer: ResolvedAnswer,
+): boolean => {
+  if (unit.conversion.kind !== 'linear' || answer.preferredPower === null || answer.preferredPower === 0) {
+    return false;
   }
 
-  const value = evaluation.value / Math.pow(displayUnit.conversion.toBaseFactor, power);
-  const roundedValue = Number(value.toPrecision(12)).toString();
-  const unitLabel = power === 1
-    ? displayUnit.symbol
-    : formatUnitWithSuperscripts(`${displayUnit.symbol}^${power}`);
+  for (const baseDimension of BASE_DIMENSIONS) {
+    const unitExponent = unit.dimension[baseDimension] ?? 0;
+    const answerExponent = answer.dimension[baseDimension] ?? 0;
 
-  return `${roundedValue} ${unitLabel}`;
+    if (unitExponent * answer.preferredPower !== answerExponent) {
+      return false;
+    }
+  }
+
+  return true;
+};
+
+const formatAnswerDisplay = (
+  answer: ResolvedAnswer | null,
+  selectedUnitId: string | null,
+): { resultText: string; numericText: string; unitText: string | null } => {
+  if (!answer) {
+    return { resultText: '0', numericText: '0', unitText: null };
+  }
+
+  const selectedUnit = selectedUnitId
+    ? DEFAULT_UNIT_REGISTRY.find(unit => unit.id === selectedUnitId)
+    : undefined;
+
+  if (
+    !selectedUnit ||
+    !answer.preferredPower ||
+    answer.preferredPower === 0 ||
+    !isCompatibleWithAnswer(selectedUnit, answer)
+  ) {
+    const numericText = Number(answer.value.toPrecision(12)).toString();
+    return { resultText: numericText, numericText, unitText: null };
+  }
+
+  const convertedValue = answer.value / Math.pow(selectedUnit.conversion.toBaseFactor, answer.preferredPower);
+  const numericText = Number(convertedValue.toPrecision(12)).toString();
+  const unitText = answer.preferredPower === 1
+    ? selectedUnit.symbol
+    : formatUnitWithSuperscripts(`${selectedUnit.symbol}^${answer.preferredPower}`);
+
+  return {
+    resultText: `${numericText} ${unitText}`,
+    numericText,
+    unitText,
+  };
+};
+
+const resolveAnswer = (expression: string): ResolvedAnswer => {
+  const parsed = parser.parse(expression);
+  const evaluation = expressionEvaluator.evaluate(parsed, { units: DEFAULT_UNIT_REGISTRY });
+  const firstUnitToken = parsed.tokens.find((token) => token.type === 'unit');
+
+  if (!firstUnitToken) {
+    return {
+      value: evaluation.value,
+      dimension: evaluation.dimension,
+      preferredUnitId: null,
+      preferredPower: null,
+    };
+  }
+
+  const preferredUnit = findUnitByToken(firstUnitToken.lexeme);
+
+  if (!preferredUnit || preferredUnit.conversion.kind !== 'linear') {
+    return {
+      value: evaluation.value,
+      dimension: evaluation.dimension,
+      preferredUnitId: null,
+      preferredPower: null,
+    };
+  }
+
+  const preferredPower = derivePowerForUnit(preferredUnit, evaluation.dimension);
+
+  return {
+    value: evaluation.value,
+    dimension: evaluation.dimension,
+    preferredUnitId: preferredPower ? preferredUnit.id : null,
+    preferredPower,
+  };
 };
 
 export const HomeScreen = () => {
   const [tokens, setTokens] = useState<readonly InputToken[]>([]);
   const [lastResult, setLastResult] = useState('0');
+  const [lastResolvedAnswer, setLastResolvedAnswer] = useState<ResolvedAnswer | null>(null);
+  const [selectedAnswerUnitId, setSelectedAnswerUnitId] = useState<string | null>(null);
   const [unitMode, setUnitMode] = useState<UnitMode>('SI');
   const [historyVisible, setHistoryVisible] = useState(false);
   const [historyEntries, setHistoryEntries] = useState<readonly HistoryEntry[]>([]);
-  const [unitOverlayVisible, setUnitOverlayVisible] = useState(false);
+  const [bottomSheetMode, setBottomSheetMode] = useState<BottomSheetMode>(null);
   const [recentUnits, setRecentUnits] = useState<readonly string[]>([]);
 
   const inputPreview = useMemo(() => formatTokens(tokens), [tokens]);
   const unitCategories = unitMode === 'SI' ? SI_UNIT_CATEGORIES : US_UNIT_CATEGORIES;
+  const answerDisplay = useMemo(
+    () => formatAnswerDisplay(lastResolvedAnswer, selectedAnswerUnitId),
+    [lastResolvedAnswer, selectedAnswerUnitId],
+  );
+
+  const compatibleUnits = useMemo(() => {
+    if (!lastResolvedAnswer) {
+      return [];
+    }
+
+    return DEFAULT_UNIT_REGISTRY
+      .filter(unit => isCompatibleWithAnswer(unit, lastResolvedAnswer))
+      .sort((left, right) => left.symbol.localeCompare(right.symbol));
+  }, [lastResolvedAnswer]);
 
   const trackRecentUnit = (unit: string): void => {
     setRecentUnits(previous => [unit, ...previous.filter(item => item !== unit)].slice(0, 4));
@@ -207,7 +304,7 @@ export const HomeScreen = () => {
   };
 
   const insertAnswerToken = (): void => {
-    pushToken('answer', lastResult);
+    pushToken('answer', answerDisplay.numericText);
   };
 
   const storeToHistory = (expression: string, result: string): void => {
@@ -230,10 +327,18 @@ export const HomeScreen = () => {
     let result = '';
 
     try {
-      result = formatComputedResult(expression);
+      const resolvedAnswer = resolveAnswer(expression);
+      const nextSelectedUnitId = resolvedAnswer.preferredUnitId;
+      const nextDisplay = formatAnswerDisplay(resolvedAnswer, nextSelectedUnitId);
+
+      setLastResolvedAnswer(resolvedAnswer);
+      setSelectedAnswerUnitId(nextSelectedUnitId);
+      result = nextDisplay.resultText;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Invalid expression.';
       result = `Error: ${message}`;
+      setLastResolvedAnswer(null);
+      setSelectedAnswerUnitId(null);
     }
 
     setLastResult(result);
@@ -267,6 +372,14 @@ export const HomeScreen = () => {
     }
   };
 
+  const openAnswerUnitSheet = (): void => {
+    if (!answerDisplay.unitText || compatibleUnits.length === 0) {
+      return;
+    }
+
+    setBottomSheetMode('answerUnits');
+  };
+
   return (
     <View style={styles.container}>
       <View style={styles.topBar}>
@@ -276,15 +389,15 @@ export const HomeScreen = () => {
           <Pressable
             style={({ pressed }) => [
               styles.historyButton,
-              unitOverlayVisible && styles.historyButtonActive,
+              bottomSheetMode === 'inputUnits' && styles.historyButtonActive,
               pressed && styles.scaleDown,
             ]}
-            onPress={() => setUnitOverlayVisible(previous => !previous)}
+            onPress={() => setBottomSheetMode(previous => (previous === 'inputUnits' ? null : 'inputUnits'))}
           >
             <Text
               style={[
                 styles.historyButtonLabel,
-                unitOverlayVisible && styles.historyButtonLabelActive,
+                bottomSheetMode === 'inputUnits' && styles.historyButtonLabelActive,
               ]}
             >
               Units
@@ -328,9 +441,16 @@ export const HomeScreen = () => {
         <Text style={styles.expressionText} numberOfLines={2}>
           {inputPreview}
         </Text>
-        <Text style={styles.resultText} numberOfLines={2}>
-          {lastResult}
-        </Text>
+        <View style={styles.resultRow}>
+          <Text style={styles.resultText} numberOfLines={1}>
+            {answerDisplay.numericText}
+          </Text>
+          {answerDisplay.unitText ? (
+            <Pressable onPress={openAnswerUnitSheet} style={({ pressed }) => [styles.resultUnitChip, pressed && styles.scaleDown]}>
+              <Text style={styles.resultUnitText}>{answerDisplay.unitText}</Text>
+            </Pressable>
+          ) : null}
+        </View>
       </View>
 
       <View style={styles.quickBar}>
@@ -374,35 +494,78 @@ export const HomeScreen = () => {
         </View>
       )}
 
-      {unitOverlayVisible ? (
-        <ScrollView style={styles.unitOverlay} contentContainerStyle={styles.unitOverlayContent}>
-          {unitCategories.map(category => (
-            <View key={category.key} style={styles.unitCategorySection}>
-              <Text style={styles.unitCategoryTitle}>{category.label}</Text>
-              <View style={styles.unitChipRow}>
-                {category.units.map(unit => (
-                  <Pressable
-                    key={unit}
-                    style={({ pressed }) => [
-                      styles.unitChip,
-                      pressed && styles.scaleDown,
-                    ]}
-                    onPress={() => pushToken('unit', unit)}
-                  >
-                    <Text style={styles.unitChipLabel}>{unit}</Text>
-                  </Pressable>
+      <View style={styles.keypadGrid}>
+        {mainPadButtons.map(button => (
+          <PadKey key={button.label} button={button} onPress={handleButtonPress} />
+        ))}
+      </View>
+
+      {bottomSheetMode ? (
+        <View style={styles.bottomSheetBackdrop}>
+          <Pressable style={styles.bottomSheetDismissArea} onPress={() => setBottomSheetMode(null)} />
+          <View style={styles.bottomSheet}>
+            <View style={styles.sheetHandle} />
+
+            {bottomSheetMode === 'inputUnits' ? (
+              <ScrollView style={styles.bottomSheetScroll} contentContainerStyle={styles.unitOverlayContent}>
+                {unitCategories.map(category => (
+                  <View key={category.key} style={styles.unitCategorySection}>
+                    <Text style={styles.unitCategoryTitle}>{category.label}</Text>
+                    <View style={styles.unitChipRow}>
+                      {category.units.map(unit => (
+                        <Pressable
+                          key={unit}
+                          style={({ pressed }) => [
+                            styles.unitChip,
+                            pressed && styles.scaleDown,
+                          ]}
+                          onPress={() => {
+                            pushToken('unit', unit);
+                            setBottomSheetMode(null);
+                          }}
+                        >
+                          <Text style={styles.unitChipLabel}>{unit}</Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                  </View>
                 ))}
-              </View>
-            </View>
-          ))}
-        </ScrollView>
-      ) : (
-        <View style={styles.keypadGrid}>
-          {mainPadButtons.map(button => (
-            <PadKey key={button.label} button={button} onPress={handleButtonPress} />
-          ))}
+              </ScrollView>
+            ) : (
+              <ScrollView style={styles.bottomSheetScroll} contentContainerStyle={styles.unitOverlayContent}>
+                <View style={styles.unitCategorySection}>
+                  <Text style={styles.unitCategoryTitle}>Compatible units</Text>
+                  <View style={styles.unitChipRow}>
+                    {compatibleUnits.map(unit => {
+                      const selected = unit.id === selectedAnswerUnitId;
+                      const label = lastResolvedAnswer?.preferredPower === 1
+                        ? unit.symbol
+                        : formatUnitWithSuperscripts(`${unit.symbol}^${lastResolvedAnswer?.preferredPower}`);
+
+                      return (
+                        <Pressable
+                          key={unit.id}
+                          style={({ pressed }) => [
+                            styles.unitChip,
+                            selected && styles.unitChipSelected,
+                            pressed && styles.scaleDown,
+                          ]}
+                          onPress={() => {
+                            setSelectedAnswerUnitId(unit.id);
+                            setLastResult(formatAnswerDisplay(lastResolvedAnswer, unit.id).resultText);
+                          }}
+                        >
+                          <Text style={[styles.unitChipLabel, selected && styles.unitChipLabelSelected]}>{label}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                </View>
+              </ScrollView>
+            )}
+          </View>
         </View>
-      )}
+      ) : null}
     </View>
   );
 };
@@ -518,12 +681,28 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     minHeight: 64,
   },
+  resultRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 10,
+  },
   resultText: {
     textAlign: 'right',
     color: '#0f172a',
     fontSize: 34,
     fontWeight: '700',
-    minHeight: 44,
+  },
+  resultUnitChip: {
+    borderRadius: 14,
+    backgroundColor: '#dbeafe',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  resultUnitText: {
+    color: '#1d4ed8',
+    fontSize: 18,
+    fontWeight: '700',
   },
   quickBar: {
     borderRadius: 16,
@@ -588,41 +767,6 @@ const styles = StyleSheet.create({
     color: '#111827',
     fontWeight: '600',
   },
-  unitOverlay: {
-    flex: 1,
-    backgroundColor: '#ffffff',
-    borderRadius: 20,
-  },
-  unitOverlayContent: {
-    padding: 14,
-  },
-  unitCategorySection: {
-    marginBottom: 16,
-  },
-  unitCategoryTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#374151',
-    marginBottom: 8,
-  },
-  unitChipRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  unitChip: {
-    borderRadius: 16,
-    backgroundColor: '#e5e7eb',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    minWidth: 56,
-    alignItems: 'center',
-  },
-  unitChipLabel: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#1f2937',
-  },
   keypadGrid: {
     flex: 1,
     flexDirection: 'row',
@@ -662,6 +806,70 @@ const styles = StyleSheet.create({
   },
   keyLabelDanger: {
     color: '#b91c1c',
+  },
+  bottomSheetBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(15, 23, 42, 0.3)',
+    justifyContent: 'flex-end',
+  },
+  bottomSheetDismissArea: {
+    flex: 1,
+  },
+  bottomSheet: {
+    backgroundColor: '#ffffff',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    maxHeight: '56%',
+    paddingTop: 8,
+    paddingBottom: 16,
+  },
+  sheetHandle: {
+    alignSelf: 'center',
+    width: 42,
+    height: 5,
+    borderRadius: 999,
+    backgroundColor: '#d1d5db',
+    marginBottom: 10,
+  },
+  bottomSheetScroll: {
+    flexGrow: 0,
+  },
+  unitOverlayContent: {
+    paddingHorizontal: 14,
+    paddingBottom: 8,
+  },
+  unitCategorySection: {
+    marginBottom: 16,
+  },
+  unitCategoryTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#374151',
+    marginBottom: 8,
+  },
+  unitChipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  unitChip: {
+    borderRadius: 16,
+    backgroundColor: '#e5e7eb',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    minWidth: 56,
+    alignItems: 'center',
+  },
+  unitChipSelected: {
+    backgroundColor: '#2563eb',
+  },
+  unitChipLabel: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#1f2937',
+  },
+  unitChipLabelSelected: {
+    color: '#ffffff',
   },
   scaleDown: {
     transform: [{ scale: 0.96 }],
