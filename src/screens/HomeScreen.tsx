@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { parser } from '../parser';
 import { expressionEvaluator } from '../engine/evaluation';
 import {
@@ -30,7 +30,7 @@ interface PadButton {
   readonly label: string;
   readonly tokenType?: TokenType;
   readonly tokenValue?: string;
-  readonly action?: 'del' | 'ans' | 'clear' | 'equals';
+  readonly action?: 'del' | 'ans' | 'clear' | 'equals' | 'tenPower' | 'ePower' | 'square' | 'sqrt' | 'factorial' | 'percent';
   readonly variant?: 'default' | 'operator' | 'accent' | 'danger';
 }
 
@@ -53,35 +53,68 @@ interface ResolvedAnswer {
   readonly preferredPower: number | null;
 }
 
-const mainPadButtons: readonly PadButton[] = [
+const compactPadButtons: readonly PadButton[] = [
   { label: 'C', action: 'clear', variant: 'danger' },
   { label: 'DEL', action: 'del', variant: 'operator' },
-  { label: '(', tokenType: 'paren', tokenValue: '(', variant: 'operator' },
-  { label: ')', tokenType: 'paren', tokenValue: ')', variant: 'operator' },
+  { label: '^', tokenType: 'power', tokenValue: '^', variant: 'operator' },
+  { label: '÷', tokenType: 'operator', tokenValue: '/', variant: 'operator' },
 
   { label: '7', tokenType: 'number', tokenValue: '7' },
   { label: '8', tokenType: 'number', tokenValue: '8' },
   { label: '9', tokenType: 'number', tokenValue: '9' },
-  { label: '÷', tokenType: 'operator', tokenValue: '/', variant: 'operator' },
+  { label: '×', tokenType: 'operator', tokenValue: '*', variant: 'operator' },
 
   { label: '4', tokenType: 'number', tokenValue: '4' },
   { label: '5', tokenType: 'number', tokenValue: '5' },
   { label: '6', tokenType: 'number', tokenValue: '6' },
-  { label: '×', tokenType: 'operator', tokenValue: '*', variant: 'operator' },
+  { label: '-', tokenType: 'operator', tokenValue: '-', variant: 'operator' },
 
   { label: '1', tokenType: 'number', tokenValue: '1' },
   { label: '2', tokenType: 'number', tokenValue: '2' },
   { label: '3', tokenType: 'number', tokenValue: '3' },
-  { label: '-', tokenType: 'operator', tokenValue: '-', variant: 'operator' },
+  { label: '+', tokenType: 'operator', tokenValue: '+', variant: 'operator' },
 
   { label: 'ANS', action: 'ans' },
   { label: '0', tokenType: 'number', tokenValue: '0' },
   { label: '.', tokenType: 'number', tokenValue: '.' },
+  { label: '=', action: 'equals', variant: 'accent' },
+];
+
+const expandedPadButtons: readonly PadButton[] = [
+  { label: '(', tokenType: 'paren', tokenValue: '(', variant: 'operator' },
+  { label: ')', tokenType: 'paren', tokenValue: ')', variant: 'operator' },
+  { label: '%', action: 'percent', variant: 'operator' },
+  { label: 'π', tokenType: 'number', tokenValue: '3.1415926535', variant: 'operator' },
+  { label: '!', action: 'factorial', variant: 'operator' },
+
+  { label: '10^', action: 'tenPower', variant: 'operator' },
+  { label: 'C', action: 'clear', variant: 'danger' },
+  { label: 'DEL', action: 'del', variant: 'operator' },
+  { label: '^', tokenType: 'power', tokenValue: '^', variant: 'operator' },
+  { label: '÷', tokenType: 'operator', tokenValue: '/', variant: 'operator' },
+
+  { label: 'e', tokenType: 'number', tokenValue: '2.7182818284', variant: 'operator' },
+  { label: '7', tokenType: 'number', tokenValue: '7' },
+  { label: '8', tokenType: 'number', tokenValue: '8' },
+  { label: '9', tokenType: 'number', tokenValue: '9' },
+  { label: '×', tokenType: 'operator', tokenValue: '*', variant: 'operator' },
+
+  { label: 'e^', action: 'ePower', variant: 'operator' },
+  { label: '4', tokenType: 'number', tokenValue: '4' },
+  { label: '5', tokenType: 'number', tokenValue: '5' },
+  { label: '6', tokenType: 'number', tokenValue: '6' },
+  { label: '-', tokenType: 'operator', tokenValue: '-', variant: 'operator' },
+
+  { label: '√', action: 'sqrt', variant: 'operator' },
+  { label: '1', tokenType: 'number', tokenValue: '1' },
+  { label: '2', tokenType: 'number', tokenValue: '2' },
+  { label: '3', tokenType: 'number', tokenValue: '3' },
   { label: '+', tokenType: 'operator', tokenValue: '+', variant: 'operator' },
 
-  { label: '^', tokenType: 'power', tokenValue: '^', variant: 'operator' },
-  { label: '%', tokenType: 'operator', tokenValue: '%', variant: 'operator' },
-  { label: 'π', tokenType: 'number', tokenValue: '3.14159', variant: 'operator' },
+  { label: 'x²', action: 'square', variant: 'operator' },
+  { label: 'ANS', action: 'ans' },
+  { label: '0', tokenType: 'number', tokenValue: '0' },
+  { label: '.', tokenType: 'number', tokenValue: '.' },
   { label: '=', action: 'equals', variant: 'accent' },
 ];
 
@@ -250,6 +283,7 @@ export const HomeScreen = () => {
   const [historyEntries, setHistoryEntries] = useState<readonly HistoryEntry[]>([]);
   const [bottomSheetMode, setBottomSheetMode] = useState<BottomSheetMode>(null);
   const [recentUnits, setRecentUnits] = useState<readonly string[]>([]);
+  const [morePadVisible, setMorePadVisible] = useState(false);
 
   const inputPreview = useMemo(() => formatTokens(tokens), [tokens]);
   const answerDisplay = useMemo(
@@ -295,6 +329,10 @@ export const HomeScreen = () => {
 
   const insertAnswerToken = (): void => {
     pushToken('answer', answerDisplay.numericText);
+  };
+
+  const pushTokenBatch = (next: ReadonlyArray<{ type: TokenType; value: string }>): void => {
+    next.forEach(item => pushToken(item.type, item.value));
   };
 
   const storeToHistory = (expression: string, result: string): void => {
@@ -357,10 +395,60 @@ export const HomeScreen = () => {
       return;
     }
 
+    if (button.action === 'tenPower') {
+      pushTokenBatch([
+        { type: 'number', value: '10' },
+        { type: 'power', value: '^' },
+      ]);
+      return;
+    }
+
+    if (button.action === 'ePower') {
+      pushTokenBatch([
+        { type: 'number', value: '2.7182818284' },
+        { type: 'power', value: '^' },
+      ]);
+      return;
+    }
+
+    if (button.action === 'square') {
+      pushTokenBatch([
+        { type: 'power', value: '^' },
+        { type: 'number', value: '2' },
+      ]);
+      return;
+    }
+
+    if (button.action === 'sqrt') {
+      pushTokenBatch([
+        { type: 'power', value: '^' },
+        { type: 'paren', value: '(' },
+        { type: 'number', value: '0.5' },
+        { type: 'paren', value: ')' },
+      ]);
+      return;
+    }
+
+    if (button.action === 'percent') {
+      pushTokenBatch([
+        { type: 'operator', value: '/' },
+        { type: 'number', value: '100' },
+      ]);
+      return;
+    }
+
+    if (button.action === 'factorial') {
+      return;
+    }
+
     if (button.tokenType && button.tokenValue) {
       pushToken(button.tokenType, button.tokenValue);
     }
   };
+
+  const activePadButtons = morePadVisible ? expandedPadButtons : compactPadButtons;
+  const gridColumns = morePadVisible ? 5 : 4;
+  const buttonHeight = morePadVisible ? 42 : 58;
 
   const openAnswerUnitSheet = (): void => {
     if (!answerDisplay.unitText || compatibleUnits.length === 0) {
@@ -397,6 +485,19 @@ export const HomeScreen = () => {
             onPress={() => setHistoryVisible(previous => !previous)}
           >
             <Text style={styles.historyButtonLabel}>History</Text>
+          </Pressable>
+
+          <Pressable
+            style={({ pressed }) => [
+              styles.historyButton,
+              morePadVisible && styles.historyButtonActive,
+              pressed && styles.scaleDown,
+            ]}
+            onPress={() => setMorePadVisible(previous => !previous)}
+          >
+            <Text style={[styles.historyButtonLabel, morePadVisible && styles.historyButtonLabelActive]}>
+              More
+            </Text>
           </Pressable>
         </View>
       </View>
@@ -459,8 +560,15 @@ export const HomeScreen = () => {
       )}
 
       <View style={styles.keypadGrid}>
-        {mainPadButtons.map(button => (
-          <PadKey key={button.label} button={button} onPress={handleButtonPress} />
+        {activePadButtons.map((button, index) => (
+          <PadKey
+            key={`${button.label}-${index}`}
+            button={button}
+            onPress={handleButtonPress}
+            columns={gridColumns}
+            buttonHeight={buttonHeight}
+            compact={morePadVisible}
+          />
         ))}
       </View>
 
@@ -537,14 +645,21 @@ export const HomeScreen = () => {
 const PadKey = ({
   button,
   onPress,
+  columns,
+  buttonHeight,
+  compact,
 }: {
   button: PadButton;
   onPress: (button: PadButton) => void;
+  columns: number;
+  buttonHeight: number;
+  compact: boolean;
 }) => {
   return (
     <Pressable
       style={({ pressed }) => [
         styles.key,
+        { width: `${(100 / columns) - 2}%`, minHeight: buttonHeight },
         button.variant === 'operator' && styles.keyOperator,
         button.variant === 'accent' && styles.keyAccent,
         button.variant === 'danger' && styles.keyDanger,
@@ -555,6 +670,7 @@ const PadKey = ({
       <Text
         style={[
           styles.keyLabel,
+          compact && styles.keyLabelCompact,
           button.variant === 'operator' && styles.keyLabelOperator,
           button.variant === 'accent' && styles.keyLabelAccent,
           button.variant === 'danger' && styles.keyLabelDanger,
@@ -570,7 +686,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f2f4f7',
-    paddingTop: 18,
+    paddingTop: (Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 18) + 12,
     paddingHorizontal: 16,
     paddingBottom: 16,
   },
@@ -709,9 +825,9 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     justifyContent: 'space-between',
     alignContent: 'space-between',
+    marginTop: 4,
   },
   key: {
-    width: '23%',
     minHeight: 58,
     borderRadius: 20,
     backgroundColor: '#ffffff',
@@ -732,6 +848,9 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '600',
     color: '#111827',
+  },
+  keyLabelCompact: {
+    fontSize: 17,
   },
   keyLabelOperator: {
     color: '#1f2937',
