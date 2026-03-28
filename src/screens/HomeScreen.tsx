@@ -18,7 +18,6 @@ type TokenType =
   | 'unit'
   | 'answer';
 
-type UnitMode = 'SI' | 'US';
 type BottomSheetMode = 'inputUnits' | 'answerUnits' | null;
 
 interface InputToken {
@@ -86,18 +85,11 @@ const mainPadButtons: readonly PadButton[] = [
   { label: '=', action: 'equals', variant: 'accent' },
 ];
 
-const SI_UNIT_CATEGORIES: readonly UnitCategory[] = [
-  { key: 'length', label: 'Length', units: ['mm', 'cm', 'm', 'km'] },
-  { key: 'mass', label: 'Mass', units: ['mg', 'g', 'kg', 't'] },
-  { key: 'time', label: 'Time', units: ['ms', 's', 'min', 'h'] },
-  { key: 'temp', label: 'Temperature', units: ['°C', 'K'] },
-];
-
-const US_UNIT_CATEGORIES: readonly UnitCategory[] = [
-  { key: 'length', label: 'Length', units: ['in', 'ft', 'yd', 'mi'] },
-  { key: 'mass', label: 'Mass', units: ['oz', 'lb', 'ton'] },
-  { key: 'time', label: 'Time', units: ['s', 'min', 'h', 'day'] },
-  { key: 'temp', label: 'Temperature', units: ['°F'] },
+const UNIT_CATEGORIES: readonly UnitCategory[] = [
+  { key: 'length', label: 'Length', units: ['mm', 'cm', 'm', 'km', 'in', 'ft', 'yd', 'mi'] },
+  { key: 'mass', label: 'Mass', units: ['mg', 'g', 'kg', 't', 'oz', 'lb', 'ton'] },
+  { key: 'time', label: 'Time', units: ['ms', 's', 'min', 'h', 'day'] },
+  { key: 'temp', label: 'Temperature', units: ['°C', 'K', '°F'] },
 ];
 
 const tokenSpacingNeeded = (
@@ -254,14 +246,12 @@ export const HomeScreen = () => {
   const [lastResult, setLastResult] = useState('0');
   const [lastResolvedAnswer, setLastResolvedAnswer] = useState<ResolvedAnswer | null>(null);
   const [selectedAnswerUnitId, setSelectedAnswerUnitId] = useState<string | null>(null);
-  const [unitMode, setUnitMode] = useState<UnitMode>('SI');
   const [historyVisible, setHistoryVisible] = useState(false);
   const [historyEntries, setHistoryEntries] = useState<readonly HistoryEntry[]>([]);
   const [bottomSheetMode, setBottomSheetMode] = useState<BottomSheetMode>(null);
   const [recentUnits, setRecentUnits] = useState<readonly string[]>([]);
 
   const inputPreview = useMemo(() => formatTokens(tokens), [tokens]);
-  const unitCategories = unitMode === 'SI' ? SI_UNIT_CATEGORIES : US_UNIT_CATEGORIES;
   const answerDisplay = useMemo(
     () => formatAnswerDisplay(lastResolvedAnswer, selectedAnswerUnitId),
     [lastResolvedAnswer, selectedAnswerUnitId],
@@ -413,30 +403,6 @@ export const HomeScreen = () => {
         </View>
       </View>
 
-      <View style={styles.unitToggleRow}>
-        {(['SI', 'US'] as const).map(mode => {
-          const selected = mode === unitMode;
-
-          return (
-            <Pressable
-              key={mode}
-              style={({ pressed }) => [
-                styles.unitToggle,
-                selected && styles.unitToggleSelected,
-                pressed && styles.scaleDown,
-              ]}
-              onPress={() => setUnitMode(mode)}
-            >
-              <Text
-                style={[styles.unitToggleLabel, selected && styles.unitToggleLabelSelected]}
-              >
-                {mode === 'SI' ? 'SI Units' : 'US Units'}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </View>
-
       <View style={styles.displayCard}>
         <Text style={styles.expressionText} numberOfLines={2}>
           {inputPreview}
@@ -508,7 +474,7 @@ export const HomeScreen = () => {
 
             {bottomSheetMode === 'inputUnits' ? (
               <ScrollView style={styles.bottomSheetScroll} contentContainerStyle={styles.unitOverlayContent}>
-                {unitCategories.map(category => (
+                {UNIT_CATEGORIES.map(category => (
                   <View key={category.key} style={styles.unitCategorySection}>
                     <Text style={styles.unitCategoryTitle}>{category.label}</Text>
                     <View style={styles.unitChipRow}>
@@ -641,29 +607,6 @@ const styles = StyleSheet.create({
   },
   historyButtonLabelActive: {
     color: '#ffffff',
-  },
-  unitToggleRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 12,
-  },
-  unitToggle: {
-    flex: 1,
-    borderRadius: 16,
-    paddingVertical: 10,
-    alignItems: 'center',
-    backgroundColor: '#e5e7eb',
-  },
-  unitToggleSelected: {
-    backgroundColor: '#111827',
-  },
-  unitToggleLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#4b5563',
-  },
-  unitToggleLabelSelected: {
-    color: '#f9fafb',
   },
   displayCard: {
     borderRadius: 28,
