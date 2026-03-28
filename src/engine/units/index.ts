@@ -196,6 +196,14 @@ const createAffineUnit = (
 export const UNIT_DEFINITIONS = {
   // Length (base: meter)
   meter: createLinearUnit('meter', 'Meter', 'm', 'length', createDimensionVector({ L: 1 }), 1),
+  millimeter: createLinearUnit(
+    'millimeter',
+    'Millimeter',
+    'mm',
+    'length',
+    createDimensionVector({ L: 1 }),
+    0.001,
+  ),
   centimeter: createLinearUnit(
     'centimeter',
     'Centimeter',
