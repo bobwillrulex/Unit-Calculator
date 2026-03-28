@@ -448,7 +448,6 @@ export const HomeScreen = () => {
 
   const activePadButtons = morePadVisible ? expandedPadButtons : compactPadButtons;
   const gridColumns = morePadVisible ? 5 : 4;
-  const buttonHeight = morePadVisible ? 42 : 58;
 
   const openAnswerUnitSheet = (): void => {
     if (!answerDisplay.unitText || compatibleUnits.length === 0) {
@@ -566,7 +565,6 @@ export const HomeScreen = () => {
             button={button}
             onPress={handleButtonPress}
             columns={gridColumns}
-            buttonHeight={buttonHeight}
             compact={morePadVisible}
           />
         ))}
@@ -646,23 +644,25 @@ const PadKey = ({
   button,
   onPress,
   columns,
-  buttonHeight,
   compact,
 }: {
   button: PadButton;
   onPress: (button: PadButton) => void;
   columns: number;
-  buttonHeight: number;
   compact: boolean;
 }) => {
   return (
     <Pressable
       style={({ pressed }) => [
         styles.key,
-        { width: `${(100 / columns) - 2}%`, minHeight: buttonHeight },
+        { width: `${(100 / columns) - 2}%` },
         button.variant === 'operator' && styles.keyOperator,
         button.variant === 'accent' && styles.keyAccent,
         button.variant === 'danger' && styles.keyDanger,
+        pressed && styles.keyPressed,
+        pressed && button.variant === 'operator' && styles.keyOperatorPressed,
+        pressed && button.variant === 'accent' && styles.keyAccentPressed,
+        pressed && button.variant === 'danger' && styles.keyDangerPressed,
         pressed && styles.scaleDown,
       ]}
       onPress={() => onPress(button)}
@@ -688,7 +688,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#f2f4f7',
     paddingTop: (Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 18) + 12,
     paddingHorizontal: 16,
-    paddingBottom: 16,
+    paddingBottom: Platform.OS === 'ios' ? 30 : 22,
   },
   topBar: {
     flexDirection: 'row',
@@ -824,25 +824,48 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'space-between',
-    alignContent: 'space-between',
+    alignContent: 'flex-start',
     marginTop: 4,
+    paddingBottom: 8,
   },
   key: {
-    minHeight: 58,
+    aspectRatio: 1,
     borderRadius: 20,
     backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 10,
+    shadowColor: '#0f172a',
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 1,
   },
   keyOperator: {
     backgroundColor: '#e5e7eb',
+    borderColor: '#d1d5db',
   },
   keyAccent: {
     backgroundColor: '#2563eb',
+    borderColor: '#1d4ed8',
   },
   keyDanger: {
     backgroundColor: '#fee2e2',
+    borderColor: '#fecaca',
+  },
+  keyPressed: {
+    backgroundColor: '#f3f4f6',
+  },
+  keyOperatorPressed: {
+    backgroundColor: '#d1d5db',
+  },
+  keyAccentPressed: {
+    backgroundColor: '#1d4ed8',
+  },
+  keyDangerPressed: {
+    backgroundColor: '#fecaca',
   },
   keyLabel: {
     fontSize: 20,
