@@ -1,5 +1,9 @@
 import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { parser } from '../parser';
+import { expressionEvaluator } from '../engine/evaluation';
+import { DEFAULT_UNIT_REGISTRY, BASE_DIMENSIONS, type UnitDefinition } from '../engine/units';
+import { formatUnitWithSuperscripts } from '../utils';
 
 type TokenType =
   | 'number'
@@ -110,6 +114,60 @@ const formatTokens = (tokens: readonly InputToken[]): string => {
   }, '');
 };
 
+const findUnitByToken = (token: string): UnitDefinition | undefined =>
+  DEFAULT_UNIT_REGISTRY.find((unit) => unit.symbol === token || unit.id === token);
+
+const formatComputedResult = (expression: string): string => {
+  const parsed = parser.parse(expression);
+  const evaluation = expressionEvaluator.evaluate(parsed, { units: DEFAULT_UNIT_REGISTRY });
+  const firstUnitToken = parsed.tokens.find((token) => token.type === 'unit');
+
+  if (!firstUnitToken) {
+    return Number(evaluation.value.toPrecision(12)).toString();
+  }
+
+  const displayUnit = findUnitByToken(firstUnitToken.lexeme);
+  if (!displayUnit || displayUnit.conversion.kind !== 'linear') {
+    return Number(evaluation.value.toPrecision(12)).toString();
+  }
+
+  let power: number | null = null;
+
+  for (const baseDimension of BASE_DIMENSIONS) {
+    const baseExponent = displayUnit.dimension[baseDimension] ?? 0;
+    const resultExponent = evaluation.dimension[baseDimension] ?? 0;
+
+    if (baseExponent === 0 && resultExponent === 0) {
+      continue;
+    }
+
+    if (baseExponent === 0 || resultExponent % baseExponent !== 0) {
+      power = null;
+      break;
+    }
+
+    const candidatePower = resultExponent / baseExponent;
+    if (power === null) {
+      power = candidatePower;
+    } else if (power !== candidatePower) {
+      power = null;
+      break;
+    }
+  }
+
+  if (power === null || power === 0) {
+    return Number(evaluation.value.toPrecision(12)).toString();
+  }
+
+  const value = evaluation.value / Math.pow(displayUnit.conversion.toBaseFactor, power);
+  const roundedValue = Number(value.toPrecision(12)).toString();
+  const unitLabel = power === 1
+    ? displayUnit.symbol
+    : formatUnitWithSuperscripts(`${displayUnit.symbol}^${power}`);
+
+  return `${roundedValue} ${unitLabel}`;
+};
+
 export const HomeScreen = () => {
   const [tokens, setTokens] = useState<readonly InputToken[]>([]);
   const [lastResult, setLastResult] = useState('0');
@@ -169,8 +227,14 @@ export const HomeScreen = () => {
       return;
     }
 
-    const unitTag = unitMode === 'SI' ? 'SI' : 'US';
-    const result = `${expression} (${unitTag})`;
+    let result = '';
+
+    try {
+      result = formatComputedResult(expression);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Invalid expression.';
+      result = `Error: ${message}`;
+    }
 
     setLastResult(result);
     storeToHistory(expression, result);
