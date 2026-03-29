@@ -688,7 +688,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#f2f4f7',
     paddingTop: (Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 18) + 12,
     paddingHorizontal: 16,
-    paddingBottom: Platform.OS === 'ios' ? 30 : 22,
+    paddingBottom: 16,
   },
   topBar: {
     flexDirection: 'row',
@@ -826,14 +826,12 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignContent: 'flex-start',
     marginTop: 4,
-    paddingBottom: 8,
+    paddingBottom: 0,
   },
   key: {
     aspectRatio: 1,
-    borderRadius: 20,
+    borderRadius: 0,
     backgroundColor: '#ffffff',
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 10,
@@ -845,15 +843,12 @@ const styles = StyleSheet.create({
   },
   keyOperator: {
     backgroundColor: '#e5e7eb',
-    borderColor: '#d1d5db',
   },
   keyAccent: {
     backgroundColor: '#2563eb',
-    borderColor: '#1d4ed8',
   },
   keyDanger: {
     backgroundColor: '#fee2e2',
-    borderColor: '#fecaca',
   },
   keyPressed: {
     backgroundColor: '#f3f4f6',
