@@ -826,7 +826,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignContent: 'flex-start',
     marginTop: 4,
-    paddingBottom: 0,
+    rowGap: 10,
   },
   key: {
     aspectRatio: 1,
@@ -834,7 +834,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 10,
     shadowColor: '#0f172a',
     shadowOpacity: 0.08,
     shadowRadius: 8,
