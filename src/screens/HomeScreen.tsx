@@ -448,7 +448,6 @@ export const HomeScreen = () => {
 
   const activePadButtons = morePadVisible ? expandedPadButtons : compactPadButtons;
   const gridColumns = morePadVisible ? 5 : 4;
-  const buttonHeight = morePadVisible ? 42 : 58;
 
   const openAnswerUnitSheet = (): void => {
     if (!answerDisplay.unitText || compatibleUnits.length === 0) {
@@ -566,7 +565,6 @@ export const HomeScreen = () => {
             button={button}
             onPress={handleButtonPress}
             columns={gridColumns}
-            buttonHeight={buttonHeight}
             compact={morePadVisible}
           />
         ))}
@@ -646,20 +644,18 @@ const PadKey = ({
   button,
   onPress,
   columns,
-  buttonHeight,
   compact,
 }: {
   button: PadButton;
   onPress: (button: PadButton) => void;
   columns: number;
-  buttonHeight: number;
   compact: boolean;
 }) => {
   return (
     <Pressable
       style={({ pressed }) => [
         styles.key,
-        { width: `${(100 / columns) - 2}%`, minHeight: buttonHeight },
+        { width: `${(100 / columns) - 2}%` },
         button.variant === 'operator' && styles.keyOperator,
         button.variant === 'accent' && styles.keyAccent,
         button.variant === 'danger' && styles.keyDanger,
@@ -824,16 +820,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'space-between',
-    alignContent: 'space-between',
+    alignContent: 'flex-start',
     marginTop: 4,
+    rowGap: 10,
   },
   key: {
-    minHeight: 58,
+    aspectRatio: 1,
     borderRadius: 20,
     backgroundColor: '#ffffff',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 10,
   },
   keyOperator: {
     backgroundColor: '#e5e7eb',
