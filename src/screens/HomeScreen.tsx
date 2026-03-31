@@ -352,6 +352,7 @@ export const HomeScreen = () => {
     () => formatAnswerDisplay(lastResolvedAnswer, selectedAnswerUnitsByDimension),
     [lastResolvedAnswer, selectedAnswerUnitsByDimension],
   );
+  const resultDisplayText = answerDisplay.numericText || lastResult;
 
   const compatibleUnitsForActiveDimension = useMemo(() => {
     if (!activeAnswerUnitDimension) {
@@ -582,7 +583,7 @@ export const HomeScreen = () => {
         </Text>
         <View style={styles.resultRow}>
           <Text style={styles.resultText} numberOfLines={1}>
-            {answerDisplay.numericText}
+            {resultDisplayText}
           </Text>
           {answerDisplay.unitLayout ? (
             <View style={styles.resultUnitExpression}>
