@@ -5,6 +5,7 @@ import { expressionEvaluator } from '../engine/evaluation';
 import {
   DEFAULT_UNIT_REGISTRY,
   BASE_DIMENSIONS,
+  type BaseDimension,
   type DimensionVector,
   type UnitDefinition,
 } from '../engine/units';
@@ -49,8 +50,7 @@ interface UnitCategory {
 interface ResolvedAnswer {
   readonly value: number;
   readonly dimension: DimensionVector;
-  readonly preferredUnitId: string | null;
-  readonly preferredPower: number | null;
+  readonly preferredUnitsByDimension: Readonly<Partial<Record<BaseDimension, string>>>;
 }
 
 const compactPadButtons: readonly PadButton[] = [
@@ -155,122 +155,142 @@ const formatTokens = (tokens: readonly InputToken[]): string => {
 const findUnitByToken = (token: string): UnitDefinition | undefined =>
   DEFAULT_UNIT_REGISTRY.find((unit) => unit.symbol === token || unit.id === token);
 
-const derivePowerForUnit = (
-  unit: UnitDefinition,
-  resultDimension: DimensionVector,
-): number | null => {
-  let power: number | null = null;
+const getUnitBaseDimension = (unit: UnitDefinition): BaseDimension | null => {
+  const nonZeroDimensions = BASE_DIMENSIONS.filter(baseDimension => (unit.dimension[baseDimension] ?? 0) !== 0);
+  if (nonZeroDimensions.length !== 1) {
+    return null;
+  }
+
+  const [baseDimension] = nonZeroDimensions;
+  return (unit.dimension[baseDimension] ?? 0) === 1 ? baseDimension : null;
+};
+
+const getLinearUnitsForBaseDimension = (baseDimension: BaseDimension): readonly UnitDefinition[] =>
+  DEFAULT_UNIT_REGISTRY
+    .filter(unit => unit.conversion.kind === 'linear' && getUnitBaseDimension(unit) === baseDimension)
+    .sort((left, right) => left.symbol.localeCompare(right.symbol));
+
+const getDefaultUnitIdForBaseDimension = (baseDimension: BaseDimension): string | null => {
+  const canonical = getLinearUnitsForBaseDimension(baseDimension).find(unit => unit.conversion.toBaseFactor === 1);
+  return canonical?.id ?? null;
+};
+
+const formatUnitToken = (unitSymbol: string, exponent: number): string =>
+  exponent === 1 ? unitSymbol : formatUnitWithSuperscripts(`${unitSymbol}^${exponent}`);
+
+interface UnitTerm {
+  readonly baseDimension: BaseDimension;
+  readonly exponent: number;
+  readonly unit: UnitDefinition;
+}
+
+interface UnitLayout {
+  readonly numerator: readonly UnitTerm[];
+  readonly denominator: readonly UnitTerm[];
+}
+
+const buildUnitLayout = (
+  answer: ResolvedAnswer,
+  selectedUnitsByDimension: Readonly<Partial<Record<BaseDimension, string>>>,
+): UnitLayout | null => {
+  const numerator: UnitTerm[] = [];
+  const denominator: UnitTerm[] = [];
 
   for (const baseDimension of BASE_DIMENSIONS) {
-    const baseExponent = unit.dimension[baseDimension] ?? 0;
-    const resultExponent = resultDimension[baseDimension] ?? 0;
-
-    if (baseExponent === 0 && resultExponent === 0) {
+    const exponent = answer.dimension[baseDimension] ?? 0;
+    if (exponent === 0) {
       continue;
     }
 
-    if (baseExponent === 0 || resultExponent % baseExponent !== 0) {
+    const selectedUnitId = selectedUnitsByDimension[baseDimension] ?? getDefaultUnitIdForBaseDimension(baseDimension);
+    if (!selectedUnitId) {
       return null;
     }
 
-    const candidatePower = resultExponent / baseExponent;
-    if (power === null) {
-      power = candidatePower;
-    } else if (power !== candidatePower) {
+    const selectedUnit = DEFAULT_UNIT_REGISTRY.find(unit => unit.id === selectedUnitId);
+    if (!selectedUnit || selectedUnit.conversion.kind !== 'linear') {
       return null;
     }
+
+    const target = exponent > 0 ? numerator : denominator;
+    target.push({
+      baseDimension,
+      exponent: Math.abs(exponent),
+      unit: selectedUnit,
+    });
   }
 
-  return power;
-};
-
-const isCompatibleWithAnswer = (
-  unit: UnitDefinition,
-  answer: ResolvedAnswer,
-): boolean => {
-  if (unit.conversion.kind !== 'linear' || answer.preferredPower === null || answer.preferredPower === 0) {
-    return false;
-  }
-
-  for (const baseDimension of BASE_DIMENSIONS) {
-    const unitExponent = unit.dimension[baseDimension] ?? 0;
-    const answerExponent = answer.dimension[baseDimension] ?? 0;
-
-    if (unitExponent * answer.preferredPower !== answerExponent) {
-      return false;
-    }
-  }
-
-  return true;
+  return { numerator, denominator };
 };
 
 const formatAnswerDisplay = (
   answer: ResolvedAnswer | null,
-  selectedUnitId: string | null,
-): { resultText: string; numericText: string; unitText: string | null } => {
+  selectedUnitsByDimension: Readonly<Partial<Record<BaseDimension, string>>>,
+): { resultText: string; numericText: string; unitLayout: UnitLayout | null } => {
   if (!answer) {
-    return { resultText: '', numericText: '', unitText: null };
+    return { resultText: '', numericText: '', unitLayout: null };
   }
 
-  const selectedUnit = selectedUnitId
-    ? DEFAULT_UNIT_REGISTRY.find(unit => unit.id === selectedUnitId)
-    : undefined;
-
-  if (
-    !selectedUnit ||
-    !answer.preferredPower ||
-    answer.preferredPower === 0 ||
-    !isCompatibleWithAnswer(selectedUnit, answer)
-  ) {
+  const unitLayout = buildUnitLayout(answer, selectedUnitsByDimension);
+  if (!unitLayout) {
     const numericText = Number(answer.value.toPrecision(12)).toString();
-    return { resultText: numericText, numericText, unitText: null };
+    return { resultText: numericText, numericText, unitLayout: null };
   }
 
-  const convertedValue = answer.value / Math.pow(selectedUnit.conversion.toBaseFactor, answer.preferredPower);
+  const conversionDivisor = [...unitLayout.numerator, ...unitLayout.denominator].reduce((product, term) => {
+    if (term.unit.conversion.kind !== 'linear') {
+      return product;
+    }
+
+    const signedExponent = (answer.dimension[term.baseDimension] ?? 0);
+    return product * Math.pow(term.unit.conversion.toBaseFactor, signedExponent);
+  }, 1);
+  const convertedValue = answer.value / conversionDivisor;
   const numericText = Number(convertedValue.toPrecision(12)).toString();
-  const unitText = answer.preferredPower === 1
-    ? selectedUnit.symbol
-    : formatUnitWithSuperscripts(`${selectedUnit.symbol}^${answer.preferredPower}`);
+  const numeratorText = unitLayout.numerator
+    .map(term => formatUnitToken(term.unit.symbol, term.exponent))
+    .join(' * ');
+  const denominatorText = unitLayout.denominator
+    .map(term => formatUnitToken(term.unit.symbol, term.exponent))
+    .join(' * ');
+  const unitText = denominatorText.length === 0
+    ? numeratorText
+    : `${numeratorText || '1'} / ${denominatorText}`;
 
   return {
     resultText: `${numericText} ${unitText}`,
     numericText,
-    unitText,
+    unitLayout,
   };
 };
 
 const resolveAnswer = (expression: string): ResolvedAnswer => {
   const parsed = parser.parse(expression);
   const evaluation = expressionEvaluator.evaluate(parsed, { units: DEFAULT_UNIT_REGISTRY });
-  const firstUnitToken = parsed.tokens.find((token) => token.type === 'unit');
+  const preferredUnitsByDimension: Partial<Record<BaseDimension, string>> = {};
 
-  if (!firstUnitToken) {
-    return {
-      value: evaluation.value,
-      dimension: evaluation.dimension,
-      preferredUnitId: null,
-      preferredPower: null,
-    };
-  }
+  parsed.tokens
+    .filter((token) => token.type === 'unit')
+    .forEach((token) => {
+      const preferredUnit = findUnitByToken(token.lexeme);
+      if (!preferredUnit || preferredUnit.conversion.kind !== 'linear') {
+        return;
+      }
+      const baseDimension = getUnitBaseDimension(preferredUnit);
+      if (!baseDimension) {
+        return;
+      }
+      if ((evaluation.dimension[baseDimension] ?? 0) === 0 || preferredUnitsByDimension[baseDimension]) {
+        return;
+      }
 
-  const preferredUnit = findUnitByToken(firstUnitToken.lexeme);
-
-  if (!preferredUnit || preferredUnit.conversion.kind !== 'linear') {
-    return {
-      value: evaluation.value,
-      dimension: evaluation.dimension,
-      preferredUnitId: null,
-      preferredPower: null,
-    };
-  }
-
-  const preferredPower = derivePowerForUnit(preferredUnit, evaluation.dimension);
+      preferredUnitsByDimension[baseDimension] = preferredUnit.id;
+    });
 
   return {
     value: evaluation.value,
     dimension: evaluation.dimension,
-    preferredUnitId: preferredPower ? preferredUnit.id : null,
-    preferredPower,
+    preferredUnitsByDimension,
   };
 };
 
@@ -279,7 +299,8 @@ export const HomeScreen = () => {
   const [tokens, setTokens] = useState<readonly InputToken[]>([]);
   const [lastResult, setLastResult] = useState('');
   const [lastResolvedAnswer, setLastResolvedAnswer] = useState<ResolvedAnswer | null>(null);
-  const [selectedAnswerUnitId, setSelectedAnswerUnitId] = useState<string | null>(null);
+  const [selectedAnswerUnitsByDimension, setSelectedAnswerUnitsByDimension] = useState<Partial<Record<BaseDimension, string>>>({});
+  const [activeAnswerUnitDimension, setActiveAnswerUnitDimension] = useState<BaseDimension | null>(null);
   const [historyVisible, setHistoryVisible] = useState(false);
   const [historyEntries, setHistoryEntries] = useState<readonly HistoryEntry[]>([]);
   const [bottomSheetMode, setBottomSheetMode] = useState<BottomSheetMode>(null);
@@ -288,19 +309,17 @@ export const HomeScreen = () => {
 
   const inputPreview = useMemo(() => formatTokens(tokens), [tokens]);
   const answerDisplay = useMemo(
-    () => formatAnswerDisplay(lastResolvedAnswer, selectedAnswerUnitId),
-    [lastResolvedAnswer, selectedAnswerUnitId],
+    () => formatAnswerDisplay(lastResolvedAnswer, selectedAnswerUnitsByDimension),
+    [lastResolvedAnswer, selectedAnswerUnitsByDimension],
   );
 
-  const compatibleUnits = useMemo(() => {
-    if (!lastResolvedAnswer) {
+  const compatibleUnitsForActiveDimension = useMemo(() => {
+    if (!activeAnswerUnitDimension) {
       return [];
     }
 
-    return DEFAULT_UNIT_REGISTRY
-      .filter(unit => isCompatibleWithAnswer(unit, lastResolvedAnswer))
-      .sort((left, right) => left.symbol.localeCompare(right.symbol));
-  }, [lastResolvedAnswer]);
+    return getLinearUnitsForBaseDimension(activeAnswerUnitDimension);
+  }, [activeAnswerUnitDimension]);
 
   const trackRecentUnit = (unit: string): void => {
     setRecentUnits(previous => [unit, ...previous.filter(item => item !== unit)].slice(0, 4));
@@ -327,7 +346,8 @@ export const HomeScreen = () => {
   const clearAllTokens = (): void => {
     setTokens([]);
     setLastResolvedAnswer(null);
-    setSelectedAnswerUnitId(null);
+    setSelectedAnswerUnitsByDimension({});
+    setActiveAnswerUnitDimension(null);
     setLastResult('');
   };
 
@@ -360,17 +380,18 @@ export const HomeScreen = () => {
 
     try {
       const resolvedAnswer = resolveAnswer(expression);
-      const nextSelectedUnitId = resolvedAnswer.preferredUnitId;
-      const nextDisplay = formatAnswerDisplay(resolvedAnswer, nextSelectedUnitId);
+      const nextSelectedUnits = resolvedAnswer.preferredUnitsByDimension;
+      const nextDisplay = formatAnswerDisplay(resolvedAnswer, nextSelectedUnits);
 
       setLastResolvedAnswer(resolvedAnswer);
-      setSelectedAnswerUnitId(nextSelectedUnitId);
+      setSelectedAnswerUnitsByDimension(nextSelectedUnits);
       result = nextDisplay.resultText;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Invalid expression.';
       result = `Error: ${message}`;
       setLastResolvedAnswer(null);
-      setSelectedAnswerUnitId(null);
+      setSelectedAnswerUnitsByDimension({});
+      setActiveAnswerUnitDimension(null);
     }
 
     setLastResult(result);
@@ -456,11 +477,12 @@ export const HomeScreen = () => {
   const keypadHorizontalPadding = 32;
   const keySize = Math.floor((windowWidth - keypadHorizontalPadding - (keyGap * (gridColumns - 1))) / gridColumns);
 
-  const openAnswerUnitSheet = (): void => {
-    if (!answerDisplay.unitText || compatibleUnits.length === 0) {
+  const openAnswerUnitSheet = (baseDimension: BaseDimension): void => {
+    if (!answerDisplay.unitLayout) {
       return;
     }
 
+    setActiveAnswerUnitDimension(baseDimension);
     setBottomSheetMode('answerUnits');
   };
 
@@ -516,10 +538,34 @@ export const HomeScreen = () => {
           <Text style={styles.resultText} numberOfLines={1}>
             {answerDisplay.numericText}
           </Text>
-          {answerDisplay.unitText ? (
-            <Pressable onPress={openAnswerUnitSheet} style={({ pressed }) => [styles.resultUnitChip, pressed && styles.scaleDown]}>
-              <Text style={styles.resultUnitText}>{answerDisplay.unitText}</Text>
-            </Pressable>
+          {answerDisplay.unitLayout ? (
+            <View style={styles.resultUnitExpression}>
+              {answerDisplay.unitLayout.numerator.map((term, index) => (
+                <View key={`${term.baseDimension}-num`} style={styles.resultUnitTokenRow}>
+                  {index > 0 ? <Text style={styles.resultUnitOperator}>*</Text> : null}
+                  <Pressable
+                    onPress={() => openAnswerUnitSheet(term.baseDimension)}
+                    style={({ pressed }) => [styles.resultUnitChip, pressed && styles.scaleDown]}
+                  >
+                    <Text style={styles.resultUnitText}>{formatUnitToken(term.unit.symbol, term.exponent)}</Text>
+                  </Pressable>
+                </View>
+              ))}
+              {answerDisplay.unitLayout.denominator.length > 0 ? (
+                <Text style={styles.resultUnitOperator}>/</Text>
+              ) : null}
+              {answerDisplay.unitLayout.denominator.map((term, index) => (
+                <View key={`${term.baseDimension}-den`} style={styles.resultUnitTokenRow}>
+                  {index > 0 ? <Text style={styles.resultUnitOperator}>*</Text> : null}
+                  <Pressable
+                    onPress={() => openAnswerUnitSheet(term.baseDimension)}
+                    style={({ pressed }) => [styles.resultUnitChip, pressed && styles.scaleDown]}
+                  >
+                    <Text style={styles.resultUnitText}>{formatUnitToken(term.unit.symbol, term.exponent)}</Text>
+                  </Pressable>
+                </View>
+              ))}
+            </View>
           ) : null}
         </View>
       </View>
@@ -613,11 +659,14 @@ export const HomeScreen = () => {
                 <View style={styles.unitCategorySection}>
                   <Text style={styles.unitCategoryTitle}>Compatible units</Text>
                   <View style={styles.unitChipRow}>
-                    {compatibleUnits.map(unit => {
-                      const selected = unit.id === selectedAnswerUnitId;
-                      const label = lastResolvedAnswer?.preferredPower === 1
-                        ? unit.symbol
-                        : formatUnitWithSuperscripts(`${unit.symbol}^${lastResolvedAnswer?.preferredPower}`);
+                    {compatibleUnitsForActiveDimension.map(unit => {
+                      const selected = activeAnswerUnitDimension
+                        ? unit.id === selectedAnswerUnitsByDimension[activeAnswerUnitDimension]
+                        : false;
+                      const exponent = activeAnswerUnitDimension
+                        ? Math.abs(lastResolvedAnswer?.dimension[activeAnswerUnitDimension] ?? 1)
+                        : 1;
+                      const label = formatUnitToken(unit.symbol, exponent);
 
                       return (
                         <Pressable
@@ -628,8 +677,15 @@ export const HomeScreen = () => {
                             pressed && styles.scaleDown,
                           ]}
                           onPress={() => {
-                            setSelectedAnswerUnitId(unit.id);
-                            setLastResult(formatAnswerDisplay(lastResolvedAnswer, unit.id).resultText);
+                            if (!activeAnswerUnitDimension) {
+                              return;
+                            }
+
+                            setSelectedAnswerUnitsByDimension(previous => {
+                              const next = { ...previous, [activeAnswerUnitDimension]: unit.id };
+                              setLastResult(formatAnswerDisplay(lastResolvedAnswer, next).resultText);
+                              return next;
+                            });
                           }}
                         >
                           <Text style={[styles.unitChipLabel, selected && styles.unitChipLabelSelected]}>{label}</Text>
@@ -750,6 +806,23 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     color: '#0f172a',
     fontSize: 34,
+    fontWeight: '700',
+  },
+  resultUnitExpression: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
+  },
+  resultUnitTokenRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  resultUnitOperator: {
+    color: '#1e3a8a',
+    fontSize: 18,
     fontWeight: '700',
   },
   resultUnitChip: {
