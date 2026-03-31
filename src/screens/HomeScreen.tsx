@@ -189,6 +189,32 @@ interface UnitLayout {
   readonly denominator: readonly UnitTerm[];
 }
 
+const SCIENTIFIC_NOTATION_THRESHOLD = 1e9;
+const MAX_DECIMAL_PLACES = 8;
+const SCIENTIFIC_SIGNIFICANT_DIGITS = 6;
+
+const trimTrailingZeros = (value: string): string =>
+  value.replace(/(\.\d*?[1-9])0+$/u, '$1').replace(/\.0+$/u, '');
+
+const formatNumericValue = (value: number): string => {
+  if (!Number.isFinite(value)) {
+    return value.toString();
+  }
+
+  const absolute = Math.abs(value);
+  const fixed = Number(value.toPrecision(12));
+  const fixedText = fixed.toString();
+  const fractional = fixedText.split('.')[1];
+  const hasManyDecimals = Boolean(fractional && fractional.length > MAX_DECIMAL_PLACES);
+  const shouldUseScientific = absolute >= SCIENTIFIC_NOTATION_THRESHOLD || hasManyDecimals;
+
+  if (!shouldUseScientific) {
+    return fixedText;
+  }
+
+  return trimTrailingZeros(value.toExponential(SCIENTIFIC_SIGNIFICANT_DIGITS));
+};
+
 const buildUnitLayout = (
   answer: ResolvedAnswer,
   selectedUnitsByDimension: Readonly<Partial<Record<BaseDimension, string>>>,
@@ -226,15 +252,15 @@ const buildUnitLayout = (
 const formatAnswerDisplay = (
   answer: ResolvedAnswer | null,
   selectedUnitsByDimension: Readonly<Partial<Record<BaseDimension, string>>>,
-): { resultText: string; numericText: string; unitLayout: UnitLayout | null } => {
+): { resultText: string; numericText: string; unitLayout: UnitLayout | null; ansTokenText: string } => {
   if (!answer) {
-    return { resultText: '', numericText: '', unitLayout: null };
+    return { resultText: '', numericText: '', unitLayout: null, ansTokenText: '' };
   }
 
   const unitLayout = buildUnitLayout(answer, selectedUnitsByDimension);
   if (!unitLayout) {
-    const numericText = Number(answer.value.toPrecision(12)).toString();
-    return { resultText: numericText, numericText, unitLayout: null };
+    const numericText = formatNumericValue(answer.value);
+    return { resultText: numericText, numericText, unitLayout: null, ansTokenText: numericText };
   }
 
   const conversionDivisor = [...unitLayout.numerator, ...unitLayout.denominator].reduce((product, term) => {
@@ -242,7 +268,7 @@ const formatAnswerDisplay = (
     return product * Math.pow(term.unit.conversion.toBaseFactor, signedExponent);
   }, 1);
   const convertedValue = answer.value / conversionDivisor;
-  const numericText = Number(convertedValue.toPrecision(12)).toString();
+  const numericText = formatNumericValue(convertedValue);
   const numeratorText = unitLayout.numerator
     .map(term => formatUnitToken(term.unit.symbol, term.exponent))
     .join(' * ');
@@ -258,13 +284,22 @@ const formatAnswerDisplay = (
       resultText: numericText,
       numericText,
       unitLayout: null,
+      ansTokenText: numericText,
     };
   }
+
+  const ansUnitText = denominatorText.length === 0
+    ? unitLayout.numerator.map(term => `${term.unit.symbol}${term.exponent === 1 ? '' : `^${term.exponent}`}`).join(' * ')
+    : `${unitLayout.numerator.length === 0
+      ? '1'
+      : unitLayout.numerator.map(term => `${term.unit.symbol}${term.exponent === 1 ? '' : `^${term.exponent}`}`).join(' * ')
+    } / ${unitLayout.denominator.map(term => `${term.unit.symbol}${term.exponent === 1 ? '' : `^${term.exponent}`}`).join(' * ')}`;
 
   return {
     resultText: `${numericText} ${unitText}`,
     numericText,
     unitLayout,
+    ansTokenText: `${numericText} ${ansUnitText}`,
   };
 };
 
@@ -310,6 +345,7 @@ export const HomeScreen = () => {
   const [bottomSheetMode, setBottomSheetMode] = useState<BottomSheetMode>(null);
   const [recentUnits, setRecentUnits] = useState<readonly string[]>([]);
   const [morePadVisible, setMorePadVisible] = useState(false);
+  const [clearInputOnNextEntry, setClearInputOnNextEntry] = useState(false);
 
   const inputPreview = useMemo(() => formatTokens(tokens), [tokens]);
   const answerDisplay = useMemo(
@@ -330,6 +366,11 @@ export const HomeScreen = () => {
   };
 
   const pushToken = (tokenType: TokenType, value: string): void => {
+    if (clearInputOnNextEntry) {
+      setTokens([]);
+      setClearInputOnNextEntry(false);
+    }
+
     const nextToken: InputToken = {
       id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
       type: tokenType,
@@ -353,10 +394,11 @@ export const HomeScreen = () => {
     setSelectedAnswerUnitsByDimension({});
     setActiveAnswerUnitDimension(null);
     setLastResult('');
+    setClearInputOnNextEntry(false);
   };
 
   const insertAnswerToken = (): void => {
-    pushToken('answer', answerDisplay.numericText);
+    pushToken('answer', answerDisplay.ansTokenText);
   };
 
   const pushTokenBatch = (next: ReadonlyArray<{ type: TokenType; value: string }>): void => {
@@ -400,7 +442,7 @@ export const HomeScreen = () => {
 
     setLastResult(result);
     storeToHistory(expression, result);
-    setTokens([]);
+    setClearInputOnNextEntry(true);
   };
 
   const handleButtonPress = (button: PadButton): void => {
