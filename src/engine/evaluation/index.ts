@@ -38,10 +38,6 @@ const evaluateUnitNode = (symbol: string, units: UnitRegistry): EvaluationResult
     throw new Error(`Unknown unit: ${symbol}`);
   }
 
-  if (unit.conversion.kind !== 'linear') {
-    throw new Error(`Affine units are not supported in expression evaluation: ${unit.symbol}`);
-  }
-
   return {
     value: unit.conversion.toBaseFactor,
     dimension: unit.dimension,

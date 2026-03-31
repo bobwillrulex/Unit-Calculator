@@ -167,7 +167,7 @@ const getUnitBaseDimension = (unit: UnitDefinition): BaseDimension | null => {
 
 const getLinearUnitsForBaseDimension = (baseDimension: BaseDimension): readonly UnitDefinition[] =>
   DEFAULT_UNIT_REGISTRY
-    .filter(unit => unit.conversion.kind === 'linear' && getUnitBaseDimension(unit) === baseDimension)
+    .filter(unit => getUnitBaseDimension(unit) === baseDimension)
     .sort((left, right) => left.symbol.localeCompare(right.symbol));
 
 const getDefaultUnitIdForBaseDimension = (baseDimension: BaseDimension): string | null => {
@@ -208,7 +208,7 @@ const buildUnitLayout = (
     }
 
     const selectedUnit = DEFAULT_UNIT_REGISTRY.find(unit => unit.id === selectedUnitId);
-    if (!selectedUnit || selectedUnit.conversion.kind !== 'linear') {
+    if (!selectedUnit) {
       return null;
     }
 
@@ -238,10 +238,6 @@ const formatAnswerDisplay = (
   }
 
   const conversionDivisor = [...unitLayout.numerator, ...unitLayout.denominator].reduce((product, term) => {
-    if (term.unit.conversion.kind !== 'linear') {
-      return product;
-    }
-
     const signedExponent = (answer.dimension[term.baseDimension] ?? 0);
     return product * Math.pow(term.unit.conversion.toBaseFactor, signedExponent);
   }, 1);
@@ -273,7 +269,7 @@ const resolveAnswer = (expression: string): ResolvedAnswer => {
     .filter((token) => token.type === 'unit')
     .forEach((token) => {
       const preferredUnit = findUnitByToken(token.lexeme);
-      if (!preferredUnit || preferredUnit.conversion.kind !== 'linear') {
+      if (!preferredUnit) {
         return;
       }
       const baseDimension = getUnitBaseDimension(preferredUnit);

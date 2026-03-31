@@ -66,8 +66,8 @@ const OPERATORS: ReadonlySet<string> = new Set(['+', '-', '*', '/', '^']);
 
 const isWhitespace = (char: string): boolean => /\s/.test(char);
 const isDigit = (char: string): boolean => /\d/.test(char);
-const isUnitStart = (char: string): boolean => /[A-Za-zµμ]/.test(char);
-const isUnitChar = (char: string): boolean => /[A-Za-z0-9_µμ]/.test(char);
+const isUnitStart = (char: string): boolean => /[A-Za-z°µμ]/.test(char);
+const isUnitChar = (char: string): boolean => /[A-Za-z0-9_°µμ]/.test(char);
 
 export class DefaultTokenizer implements Tokenizer {
   tokenize(input: string): ReadonlyArray<Token> {
