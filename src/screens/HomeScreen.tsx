@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Platform, Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, ScrollView, StatusBar, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { parser } from '../parser';
 import { expressionEvaluator } from '../engine/evaluation';
 import {
@@ -275,6 +275,7 @@ const resolveAnswer = (expression: string): ResolvedAnswer => {
 };
 
 export const HomeScreen = () => {
+  const { width: windowWidth } = useWindowDimensions();
   const [tokens, setTokens] = useState<readonly InputToken[]>([]);
   const [lastResult, setLastResult] = useState('0');
   const [lastResolvedAnswer, setLastResolvedAnswer] = useState<ResolvedAnswer | null>(null);
@@ -448,6 +449,9 @@ export const HomeScreen = () => {
 
   const activePadButtons = morePadVisible ? expandedPadButtons : compactPadButtons;
   const gridColumns = morePadVisible ? 5 : 4;
+  const keyGap = 10;
+  const keypadHorizontalPadding = 32;
+  const keySize = Math.floor((windowWidth - keypadHorizontalPadding - (keyGap * (gridColumns - 1))) / gridColumns);
 
   const openAnswerUnitSheet = (): void => {
     if (!answerDisplay.unitText || compatibleUnits.length === 0) {
@@ -564,7 +568,7 @@ export const HomeScreen = () => {
             key={`${button.label}-${index}`}
             button={button}
             onPress={handleButtonPress}
-            columns={gridColumns}
+            keySize={keySize}
             compact={morePadVisible}
           />
         ))}
@@ -643,19 +647,19 @@ export const HomeScreen = () => {
 const PadKey = ({
   button,
   onPress,
-  columns,
+  keySize,
   compact,
 }: {
   button: PadButton;
   onPress: (button: PadButton) => void;
-  columns: number;
+  keySize: number;
   compact: boolean;
 }) => {
   return (
     <Pressable
       style={({ pressed }) => [
         styles.key,
-        { width: `${(100 / columns) - 2}%` },
+        { width: keySize, height: keySize },
         button.variant === 'operator' && styles.keyOperator,
         button.variant === 'accent' && styles.keyAccent,
         button.variant === 'danger' && styles.keyDanger,
@@ -819,13 +823,13 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    alignContent: 'flex-start',
+    justifyContent: 'flex-start',
+    alignContent: 'flex-end',
     marginTop: 4,
+    columnGap: 10,
     rowGap: 10,
   },
   key: {
-    aspectRatio: 1,
     borderRadius: 20,
     backgroundColor: '#ffffff',
     alignItems: 'center',
