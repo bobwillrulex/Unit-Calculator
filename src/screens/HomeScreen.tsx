@@ -54,7 +54,7 @@ interface ResolvedAnswer {
 }
 
 const compactPadButtons: readonly PadButton[] = [
-  { label: 'C', action: 'clear', variant: 'danger' },
+  { label: 'AC', action: 'clear', variant: 'danger' },
   { label: 'DEL', action: 'del', variant: 'operator' },
   { label: '^', tokenType: 'power', tokenValue: '^', variant: 'operator' },
   { label: '÷', tokenType: 'operator', tokenValue: '/', variant: 'operator' },
@@ -88,7 +88,7 @@ const expandedPadButtons: readonly PadButton[] = [
   { label: '!', action: 'factorial', variant: 'operator' },
 
   { label: '10^', action: 'tenPower', variant: 'operator' },
-  { label: 'C', action: 'clear', variant: 'danger' },
+  { label: 'AC', action: 'clear', variant: 'danger' },
   { label: 'DEL', action: 'del', variant: 'operator' },
   { label: '^', tokenType: 'power', tokenValue: '^', variant: 'operator' },
   { label: '÷', tokenType: 'operator', tokenValue: '/', variant: 'operator' },
@@ -142,7 +142,7 @@ const tokenSpacingNeeded = (
 
 const formatTokens = (tokens: readonly InputToken[]): string => {
   if (tokens.length === 0) {
-    return '0';
+    return '';
   }
 
   return tokens.reduce((output, token, index) => {
@@ -209,7 +209,7 @@ const formatAnswerDisplay = (
   selectedUnitId: string | null,
 ): { resultText: string; numericText: string; unitText: string | null } => {
   if (!answer) {
-    return { resultText: '0', numericText: '0', unitText: null };
+    return { resultText: '', numericText: '', unitText: null };
   }
 
   const selectedUnit = selectedUnitId
@@ -277,7 +277,7 @@ const resolveAnswer = (expression: string): ResolvedAnswer => {
 export const HomeScreen = () => {
   const { width: windowWidth } = useWindowDimensions();
   const [tokens, setTokens] = useState<readonly InputToken[]>([]);
-  const [lastResult, setLastResult] = useState('0');
+  const [lastResult, setLastResult] = useState('');
   const [lastResolvedAnswer, setLastResolvedAnswer] = useState<ResolvedAnswer | null>(null);
   const [selectedAnswerUnitId, setSelectedAnswerUnitId] = useState<string | null>(null);
   const [historyVisible, setHistoryVisible] = useState(false);
@@ -326,6 +326,9 @@ export const HomeScreen = () => {
 
   const clearAllTokens = (): void => {
     setTokens([]);
+    setLastResolvedAnswer(null);
+    setSelectedAnswerUnitId(null);
+    setLastResult('');
   };
 
   const insertAnswerToken = (): void => {
@@ -349,7 +352,7 @@ export const HomeScreen = () => {
   const resolveExpression = (): void => {
     const expression = inputPreview;
 
-    if (expression === '0') {
+    if (expression.trim().length === 0) {
       return;
     }
 
@@ -663,6 +666,10 @@ const PadKey = ({
         button.variant === 'operator' && styles.keyOperator,
         button.variant === 'accent' && styles.keyAccent,
         button.variant === 'danger' && styles.keyDanger,
+        pressed && styles.keyPressed,
+        pressed && button.variant === 'operator' && styles.keyOperatorPressed,
+        pressed && button.variant === 'accent' && styles.keyAccentPressed,
+        pressed && button.variant === 'danger' && styles.keyDangerPressed,
         pressed && styles.scaleDown,
       ]}
       onPress={() => onPress(button)}
@@ -843,6 +850,18 @@ const styles = StyleSheet.create({
   },
   keyDanger: {
     backgroundColor: '#fee2e2',
+  },
+  keyPressed: {
+    backgroundColor: '#e5e7eb',
+  },
+  keyOperatorPressed: {
+    backgroundColor: '#d1d5db',
+  },
+  keyAccentPressed: {
+    backgroundColor: '#1d4ed8',
+  },
+  keyDangerPressed: {
+    backgroundColor: '#fecaca',
   },
   keyLabel: {
     fontSize: 20,
