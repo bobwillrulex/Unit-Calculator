@@ -253,6 +253,14 @@ const formatAnswerDisplay = (
     ? numeratorText
     : `${numeratorText || '1'} / ${denominatorText}`;
 
+  if (unitText.length === 0) {
+    return {
+      resultText: numericText,
+      numericText,
+      unitLayout: null,
+    };
+  }
+
   return {
     resultText: `${numericText} ${unitText}`,
     numericText,
