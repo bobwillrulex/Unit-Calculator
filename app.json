@@ -6,6 +6,9 @@
     "orientation": "portrait",
     "assetBundlePatterns": [
       "**/*"
-    ]
+    ],
+    "updates": {
+      "enabled": false
+    }
   }
 }
