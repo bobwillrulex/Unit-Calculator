@@ -102,101 +102,53 @@ export const areDimensionsEqual = (
   return true;
 };
 
-export const dimensionAlgebra = {
-  multiply(left: DimensionVector, right: DimensionVector): DimensionVector {
-    return multiplyDimensions(left, right);
-  },
-
-  divide(left: DimensionVector, right: DimensionVector): DimensionVector {
-    return divideDimensions(left, right);
-  },
-
-  pow(vector: DimensionVector, exponent: number): DimensionVector {
-    return powDimensions(vector, exponent);
-  },
-
-  equals(left: DimensionVector, right: DimensionVector): boolean {
-    return areDimensionsEqual(left, right);
-  },
-} as const;
-
-export type UnitAlgebra = typeof dimensionAlgebra;
-
-export interface LinearUnitConversion {
+export type LinearUnitConversion = {
   readonly kind: 'linear';
   readonly toBaseFactor: number;
-}
+};
 
-export interface AffineUnitConversion {
+export type AffineUnitConversion = {
   readonly kind: 'affine';
   readonly toBaseFactor: number;
   readonly toBaseOffset: number;
-}
+};
 
 export type UnitConversion = LinearUnitConversion | AffineUnitConversion;
 
-export interface UnitDefinition {
+export type UnitDefinition = {
   readonly id: string;
   readonly label: string;
   readonly symbol: string;
   readonly category: string;
   readonly dimension: DimensionVector;
   readonly conversion: UnitConversion;
-}
-
-export type Unit = UnitDefinition;
+};
 
 export type UnitRegistry = ReadonlyArray<UnitDefinition>;
 
-export interface Quantity {
-  readonly valueInBaseUnits: number;
-  readonly dimension: DimensionVector;
-}
-
-const createLinearUnit = (
+const unit = (
   id: string,
   label: string,
   symbol: string,
   category: string,
   dimension: DimensionVector,
   toBaseFactor: number,
+  toBaseOffset?: number,
 ): UnitDefinition => ({
   id,
   label,
   symbol,
   category,
   dimension,
-  conversion: {
-    kind: 'linear',
-    toBaseFactor,
-  },
-});
-
-const createAffineUnit = (
-  id: string,
-  label: string,
-  symbol: string,
-  category: string,
-  dimension: DimensionVector,
-  toBaseFactor: number,
-  toBaseOffset: number,
-): UnitDefinition => ({
-  id,
-  label,
-  symbol,
-  category,
-  dimension,
-  conversion: {
-    kind: 'affine',
-    toBaseFactor,
-    toBaseOffset,
-  },
+  conversion: toBaseOffset === undefined
+    ? { kind: 'linear', toBaseFactor }
+    : { kind: 'affine', toBaseFactor, toBaseOffset },
 });
 
 export const UNIT_DEFINITIONS = {
   // Length (base: meter)
-  meter: createLinearUnit('meter', 'Meter', 'm', 'length', createDimensionVector({ L: 1 }), 1),
-  millimeter: createLinearUnit(
+  meter: unit('meter', 'Meter', 'm', 'length', createDimensionVector({ L: 1 }), 1),
+  millimeter: unit(
     'millimeter',
     'Millimeter',
     'mm',
@@ -204,7 +156,7 @@ export const UNIT_DEFINITIONS = {
     createDimensionVector({ L: 1 }),
     0.001,
   ),
-  centimeter: createLinearUnit(
+  centimeter: unit(
     'centimeter',
     'Centimeter',
     'cm',
@@ -212,7 +164,7 @@ export const UNIT_DEFINITIONS = {
     createDimensionVector({ L: 1 }),
     0.01,
   ),
-  kilometer: createLinearUnit(
+  kilometer: unit(
     'kilometer',
     'Kilometer',
     'km',
@@ -220,14 +172,14 @@ export const UNIT_DEFINITIONS = {
     createDimensionVector({ L: 1 }),
     1000,
   ),
-  inch: createLinearUnit('inch', 'Inch', 'in', 'length', createDimensionVector({ L: 1 }), 0.0254),
-  foot: createLinearUnit('foot', 'Foot', 'ft', 'length', createDimensionVector({ L: 1 }), 0.3048),
-  yard: createLinearUnit('yard', 'Yard', 'yd', 'length', createDimensionVector({ L: 1 }), 0.9144),
-  mile: createLinearUnit('mile', 'Mile', 'mi', 'length', createDimensionVector({ L: 1 }), 1609.344),
+  inch: unit('inch', 'Inch', 'in', 'length', createDimensionVector({ L: 1 }), 0.0254),
+  foot: unit('foot', 'Foot', 'ft', 'length', createDimensionVector({ L: 1 }), 0.3048),
+  yard: unit('yard', 'Yard', 'yd', 'length', createDimensionVector({ L: 1 }), 0.9144),
+  mile: unit('mile', 'Mile', 'mi', 'length', createDimensionVector({ L: 1 }), 1609.344),
 
   // Volume (base: liter)
-  liter: createLinearUnit('liter', 'Liter', 'L', 'volume', createDimensionVector({ V: 1 }), 1),
-  milliliter: createLinearUnit(
+  liter: unit('liter', 'Liter', 'L', 'volume', createDimensionVector({ V: 1 }), 1),
+  milliliter: unit(
     'milliliter',
     'Milliliter',
     'mL',
@@ -237,8 +189,8 @@ export const UNIT_DEFINITIONS = {
   ),
 
   // Time (base: second)
-  second: createLinearUnit('second', 'Second', 's', 'time', createDimensionVector({ T: 1 }), 1),
-  millisecond: createLinearUnit(
+  second: unit('second', 'Second', 's', 'time', createDimensionVector({ T: 1 }), 1),
+  millisecond: unit(
     'millisecond',
     'Millisecond',
     'ms',
@@ -246,13 +198,13 @@ export const UNIT_DEFINITIONS = {
     createDimensionVector({ T: 1 }),
     0.001,
   ),
-  minute: createLinearUnit('minute', 'Minute', 'min', 'time', createDimensionVector({ T: 1 }), 60),
-  hour: createLinearUnit('hour', 'Hour', 'hr', 'time', createDimensionVector({ T: 1 }), 3600),
-  hourShort: createLinearUnit('hour-short', 'Hour', 'h', 'time', createDimensionVector({ T: 1 }), 3600),
-  day: createLinearUnit('day', 'Day', 'day', 'time', createDimensionVector({ T: 1 }), 86400),
+  minute: unit('minute', 'Minute', 'min', 'time', createDimensionVector({ T: 1 }), 60),
+  hour: unit('hour', 'Hour', 'hr', 'time', createDimensionVector({ T: 1 }), 3600),
+  hourShort: unit('hour-short', 'Hour', 'h', 'time', createDimensionVector({ T: 1 }), 3600),
+  day: unit('day', 'Day', 'day', 'time', createDimensionVector({ T: 1 }), 86400),
 
   // Temperature (base: kelvin) - requires affine conversion
-  celsius: createAffineUnit(
+  celsius: unit(
     'celsius',
     'Celsius',
     'C',
@@ -261,7 +213,7 @@ export const UNIT_DEFINITIONS = {
     1,
     273.15,
   ),
-  fahrenheit: createAffineUnit(
+  fahrenheit: unit(
     'fahrenheit',
     'Fahrenheit',
     'F',
@@ -270,7 +222,7 @@ export const UNIT_DEFINITIONS = {
     5 / 9,
     273.15 - 32 * (5 / 9),
   ),
-  kelvin: createLinearUnit(
+  kelvin: unit(
     'kelvin',
     'Kelvin',
     'K',

@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Platform, Pressable, ScrollView, StatusBar, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
-import { parser } from '../parser';
-import { expressionEvaluator } from '../engine/evaluation';
+import { parse } from '../parser';
+import { evaluateExpression } from '../engine/evaluation';
 import {
   DEFAULT_UNIT_REGISTRY,
   BASE_DIMENSIONS,
@@ -21,37 +21,37 @@ type TokenType =
 
 type BottomSheetMode = 'inputUnits' | 'answerUnits' | null;
 
-interface InputToken {
+type InputToken = {
   readonly id: string;
   readonly type: TokenType;
   readonly value: string;
-}
+};
 
-interface PadButton {
+type PadButton = {
   readonly label: string;
   readonly tokenType?: TokenType;
   readonly tokenValue?: string;
-  readonly action?: 'del' | 'ans' | 'clear' | 'equals' | 'tenPower' | 'ePower' | 'square' | 'sqrt' | 'factorial' | 'percent';
+  readonly action?: 'del' | 'ans' | 'clear' | 'equals' | 'tenPower' | 'ePower' | 'square' | 'sqrt' | 'percent';
   readonly variant?: 'default' | 'operator' | 'accent' | 'danger';
-}
+};
 
-interface HistoryEntry {
+type HistoryEntry = {
   readonly id: string;
   readonly expression: string;
   readonly result: string;
-}
+};
 
-interface UnitCategory {
+type UnitCategory = {
   readonly key: string;
   readonly label: string;
   readonly units: readonly string[];
-}
+};
 
-interface ResolvedAnswer {
+type ResolvedAnswer = {
   readonly value: number;
   readonly dimension: DimensionVector;
   readonly preferredUnitsByDimension: Readonly<Partial<Record<BaseDimension, string>>>;
-}
+};
 
 const compactPadButtons: readonly PadButton[] = [
   { label: 'AC', action: 'clear', variant: 'danger' },
@@ -85,7 +85,7 @@ const expandedPadButtons: readonly PadButton[] = [
   { label: ')', tokenType: 'paren', tokenValue: ')', variant: 'operator' },
   { label: '%', action: 'percent', variant: 'operator' },
   { label: 'π', tokenType: 'number', tokenValue: '3.1415926535', variant: 'operator' },
-  { label: '!', action: 'factorial', variant: 'operator' },
+  { label: '±', tokenType: 'operator', tokenValue: '-', variant: 'operator' },
 
   { label: '10^', action: 'tenPower', variant: 'operator' },
   { label: 'AC', action: 'clear', variant: 'danger' },
@@ -178,16 +178,16 @@ const getDefaultUnitIdForBaseDimension = (baseDimension: BaseDimension): string 
 const formatUnitToken = (unitSymbol: string, exponent: number): string =>
   exponent === 1 ? unitSymbol : formatUnitWithSuperscripts(`${unitSymbol}^${exponent}`);
 
-interface UnitTerm {
+type UnitTerm = {
   readonly baseDimension: BaseDimension;
   readonly exponent: number;
   readonly unit: UnitDefinition;
-}
+};
 
-interface UnitLayout {
+type UnitLayout = {
   readonly numerator: readonly UnitTerm[];
   readonly denominator: readonly UnitTerm[];
-}
+};
 
 const SCIENTIFIC_NOTATION_THRESHOLD = 1e9;
 const MAX_DECIMAL_PLACES = 8;
@@ -304,8 +304,8 @@ const formatAnswerDisplay = (
 };
 
 const resolveAnswer = (expression: string): ResolvedAnswer => {
-  const parsed = parser.parse(expression);
-  const evaluation = expressionEvaluator.evaluate(parsed, { units: DEFAULT_UNIT_REGISTRY });
+  const parsed = parse(expression);
+  const evaluation = evaluateExpression(parsed, DEFAULT_UNIT_REGISTRY);
   const preferredUnitsByDimension: Partial<Record<BaseDimension, string>> = {};
 
   parsed.tokens
@@ -506,10 +506,6 @@ export const HomeScreen = () => {
         { type: 'operator', value: '/' },
         { type: 'number', value: '100' },
       ]);
-      return;
-    }
-
-    if (button.action === 'factorial') {
       return;
     }
 

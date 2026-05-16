@@ -1,4 +1,4 @@
-import type { BinaryExpression, ExpressionNode, ParsedExpression, PowerExpression } from '../../parser';
+import type { BinaryOperator, ExpressionNode, ParsedExpression } from '../../parser';
 import {
   DIMENSIONLESS,
   areDimensionsEqual,
@@ -10,45 +10,15 @@ import {
   type UnitRegistry,
 } from '../units';
 
-export interface EvaluationContext {
-  readonly units: UnitRegistry;
-}
-
-export interface EvaluationResult {
+export type EvaluationResult = {
   readonly value: number;
   readonly dimension: DimensionVector;
-}
-
-export interface ExpressionEvaluator {
-  evaluate(parsedExpression: ParsedExpression, context: EvaluationContext): EvaluationResult;
-}
+};
 
 const findUnit = (symbol: string, units: UnitRegistry): UnitDefinition | undefined =>
   units.find((unit) => unit.symbol === symbol || unit.id === symbol);
 
-const evaluateNumberNode = (value: number): EvaluationResult => ({
-  value,
-  dimension: DIMENSIONLESS,
-});
-
-const evaluateUnitNode = (symbol: string, units: UnitRegistry): EvaluationResult => {
-  const unit = findUnit(symbol, units);
-
-  if (!unit) {
-    throw new Error(`Unknown unit: ${symbol}`);
-  }
-
-  return {
-    value: unit.conversion.toBaseFactor,
-    dimension: unit.dimension,
-  };
-};
-
-const evaluateAdditiveOperation = (
-  left: EvaluationResult,
-  right: EvaluationResult,
-  operator: '+' | '-',
-): EvaluationResult => {
+const applyAdd = (left: EvaluationResult, right: EvaluationResult, operator: '+' | '-'): EvaluationResult => {
   if (!areDimensionsEqual(left.dimension, right.dimension)) {
     throw new Error(`Dimension mismatch for "${operator}" operation.`);
   }
@@ -59,92 +29,52 @@ const evaluateAdditiveOperation = (
   };
 };
 
-const evaluateMultiplicativeOperation = (
-  left: EvaluationResult,
-  right: EvaluationResult,
-  operator: '*' | '/',
-): EvaluationResult => {
+const applyMultiply = (left: EvaluationResult, right: EvaluationResult, operator: '*' | '/'): EvaluationResult => {
   if (operator === '/' && right.value === 0) {
     throw new Error('Cannot divide by zero.');
   }
 
   return {
     value: operator === '*' ? left.value * right.value : left.value / right.value,
-    dimension:
-      operator === '*'
-        ? multiplyDimensions(left.dimension, right.dimension)
-        : divideDimensions(left.dimension, right.dimension),
+    dimension: operator === '*'
+      ? multiplyDimensions(left.dimension, right.dimension)
+      : divideDimensions(left.dimension, right.dimension),
   };
 };
 
-const evaluateBinaryExpression = (
-  node: BinaryExpression,
-  units: UnitRegistry,
-): EvaluationResult => {
-  const left = evaluateNode(node.left, units);
-  const right = evaluateNode(node.right, units);
+const evaluateBinary = (operator: BinaryOperator, left: EvaluationResult, right: EvaluationResult): EvaluationResult =>
+  operator === '+' || operator === '-'
+    ? applyAdd(left, right, operator)
+    : applyMultiply(left, right, operator);
 
-  if (node.operator === '+' || node.operator === '-') {
-    return evaluateAdditiveOperation(left, right, node.operator);
+const evaluateNode = (node: ExpressionNode, units: UnitRegistry): EvaluationResult => {
+  if (node.kind === 'number') {
+    return { value: node.value, dimension: DIMENSIONLESS };
   }
 
-  return evaluateMultiplicativeOperation(left, right, node.operator);
-};
+  if (node.kind === 'unit') {
+    const unit = findUnit(node.symbol, units);
+    if (!unit) {
+      throw new Error(`Unknown unit: ${node.symbol}`);
+    }
+    return { value: unit.conversion.toBaseFactor, dimension: unit.dimension };
+  }
 
-const evaluatePowerExpression = (node: PowerExpression, units: UnitRegistry): EvaluationResult => {
+  if (node.kind === 'binary-expression') {
+    return evaluateBinary(node.operator, evaluateNode(node.left, units), evaluateNode(node.right, units));
+  }
+
   const base = evaluateNode(node.base, units);
   const exponent = evaluateNode(node.exponent, units);
-
   if (!areDimensionsEqual(exponent.dimension, DIMENSIONLESS)) {
     throw new Error('Exponent must be dimensionless.');
   }
 
-  const evaluateNumberExponent = (): EvaluationResult => ({
+  return {
     value: Math.pow(base.value, exponent.value),
     dimension: powDimensions(base.dimension, exponent.value),
-  });
-
-  const evaluateUnitExponent = (): EvaluationResult => ({
-    value: Math.pow(base.value, exponent.value),
-    dimension: powDimensions(base.dimension, exponent.value),
-  });
-
-  const evaluateExpressionExponent = (): EvaluationResult => ({
-    value: Math.pow(base.value, exponent.value),
-    dimension: powDimensions(base.dimension, exponent.value),
-  });
-
-  switch (node.exponentType) {
-    case 'number':
-      return evaluateNumberExponent();
-    case 'unit':
-      return evaluateUnitExponent();
-    case 'expression':
-      return evaluateExpressionExponent();
-    default:
-      throw new Error('Unsupported exponent type.');
-  }
+  };
 };
 
-const evaluateNode = (node: ExpressionNode, units: UnitRegistry): EvaluationResult => {
-  switch (node.kind) {
-    case 'number':
-      return evaluateNumberNode(node.value);
-    case 'unit':
-      return evaluateUnitNode(node.symbol, units);
-    case 'binary-expression':
-      return evaluateBinaryExpression(node, units);
-    case 'power-expression':
-      return evaluatePowerExpression(node, units);
-    default:
-      throw new Error('Unsupported expression node kind.');
-  }
-};
-
-export const createExpressionEvaluator = (): ExpressionEvaluator => ({
-  evaluate(parsedExpression: ParsedExpression, context: EvaluationContext): EvaluationResult {
-    return evaluateNode(parsedExpression.ast, context.units);
-  },
-});
-
-export const expressionEvaluator: ExpressionEvaluator = createExpressionEvaluator();
+export const evaluateExpression = (parsedExpression: ParsedExpression, units: UnitRegistry): EvaluationResult =>
+  evaluateNode(parsedExpression.ast, units);
