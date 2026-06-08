@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { Platform, Pressable, ScrollView, StatusBar, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { parse } from '../parser';
 import { evaluateExpression } from '../engine/evaluation';
@@ -20,6 +20,7 @@ type TokenType =
   | 'answer';
 
 type BottomSheetMode = 'inputUnits' | 'answerUnits' | null;
+type AppPage = 'calculator' | 'history' | 'settings' | 'about' | 'privacy';
 
 type InputToken = {
   readonly id: string;
@@ -39,6 +40,8 @@ type HistoryEntry = {
   readonly id: string;
   readonly expression: string;
   readonly result: string;
+  readonly createdAt: string;
+  readonly tokenText: string | null;
 };
 
 type UnitCategory = {
@@ -190,11 +193,44 @@ type UnitLayout = {
 };
 
 const SCIENTIFIC_NOTATION_THRESHOLD = 1e9;
-const MAX_DECIMAL_PLACES = 8;
-const SCIENTIFIC_SIGNIFICANT_DIGITS = 6;
+const MIN_SCIENTIFIC_NOTATION_THRESHOLD = 1e-4;
+const MAX_RESULT_TEXT_LENGTH = 12;
+const SCIENTIFIC_SIGNIFICANT_DIGITS = 4;
+const MAX_HISTORY_ENTRIES = 20;
+const USER_ERROR_TEXT = 'err';
+const APP_VERSION = '1.0.0';
+const ABOUT_COPY: readonly string[] = [
+  'Unit Calculator is a fast expression calculator built for numbers and units in the same flow.',
+  'It is designed to keep the common actions close: type an expression, attach units, switch result units, and keep moving without setup.',
+  'The app focuses on quick everyday conversions and lightweight calculation history instead of heavy engineering workflows.',
+];
+const PRIVACY_COPY: readonly string[] = [
+  'Unit Calculator stores your recent calculations locally on your device so you can review them later.',
+  'The app does not require an account, and this build does not send your calculation history to a remote server.',
+  'If you clear history from the app, those saved entries are removed from the local in-app list.',
+];
 
-const trimTrailingZeros = (value: string): string =>
-  value.replace(/(\.\d*?[1-9])0+$/u, '$1').replace(/\.0+$/u, '');
+const trimTrailingZeros = (value: string): string => {
+  const [mantissa, exponent] = value.split('e');
+  const trimmedMantissa = mantissa.replace(/(\.\d*?[1-9])0+$/u, '$1').replace(/\.0+$/u, '');
+  return exponent ? `${trimmedMantissa}e${exponent}` : trimmedMantissa;
+};
+
+const formatPlainNumericValue = (value: number): string => {
+  const absolute = Math.abs(value);
+
+  if (absolute >= 1000) {
+    return trimTrailingZeros(value.toFixed(4));
+  }
+
+  if (absolute >= 1) {
+    return trimTrailingZeros(value.toFixed(6));
+  }
+
+  return trimTrailingZeros(value.toFixed(8));
+};
+
+const getTodayStamp = (): string => new Date().toISOString().slice(0, 10);
 
 const formatNumericValue = (value: number): string => {
   if (!Number.isFinite(value)) {
@@ -202,14 +238,19 @@ const formatNumericValue = (value: number): string => {
   }
 
   const absolute = Math.abs(value);
-  const fixed = Number(value.toPrecision(12));
-  const fixedText = fixed.toString();
-  const fractional = fixedText.split('.')[1];
-  const hasManyDecimals = Boolean(fractional && fractional.length > MAX_DECIMAL_PLACES);
-  const shouldUseScientific = absolute >= SCIENTIFIC_NOTATION_THRESHOLD || hasManyDecimals;
+  if (absolute === 0) {
+    return '0';
+  }
 
-  if (!shouldUseScientific) {
-    return fixedText;
+  const shouldUseScientific = absolute >= SCIENTIFIC_NOTATION_THRESHOLD || absolute < MIN_SCIENTIFIC_NOTATION_THRESHOLD;
+
+  if (shouldUseScientific) {
+    return trimTrailingZeros(value.toExponential(SCIENTIFIC_SIGNIFICANT_DIGITS));
+  }
+
+  const plainText = formatPlainNumericValue(value);
+  if (plainText.length <= MAX_RESULT_TEXT_LENGTH) {
+    return plainText;
   }
 
   return trimTrailingZeros(value.toExponential(SCIENTIFIC_SIGNIFICANT_DIGITS));
@@ -340,12 +381,13 @@ export const HomeScreen = () => {
   const [lastResolvedAnswer, setLastResolvedAnswer] = useState<ResolvedAnswer | null>(null);
   const [selectedAnswerUnitsByDimension, setSelectedAnswerUnitsByDimension] = useState<Partial<Record<BaseDimension, string>>>({});
   const [activeAnswerUnitDimension, setActiveAnswerUnitDimension] = useState<BaseDimension | null>(null);
-  const [historyVisible, setHistoryVisible] = useState(false);
+  const [activePage, setActivePage] = useState<AppPage>('calculator');
   const [historyEntries, setHistoryEntries] = useState<readonly HistoryEntry[]>([]);
   const [bottomSheetMode, setBottomSheetMode] = useState<BottomSheetMode>(null);
   const [recentUnits, setRecentUnits] = useState<readonly string[]>([]);
   const [morePadVisible, setMorePadVisible] = useState(false);
   const [clearInputOnNextEntry, setClearInputOnNextEntry] = useState(false);
+  const [overflowMenuVisible, setOverflowMenuVisible] = useState(false);
 
   const inputPreview = useMemo(() => formatTokens(tokens), [tokens]);
   const answerDisplay = useMemo(
@@ -364,6 +406,16 @@ export const HomeScreen = () => {
 
   const trackRecentUnit = (unit: string): void => {
     setRecentUnits(previous => [unit, ...previous.filter(item => item !== unit)].slice(0, 4));
+  };
+
+  const closeOverlays = (): void => {
+    setOverflowMenuVisible(false);
+    setBottomSheetMode(null);
+  };
+
+  const openPage = (page: AppPage): void => {
+    closeOverlays();
+    setActivePage(page);
   };
 
   const pushToken = (tokenType: TokenType, value: string): void => {
@@ -406,14 +458,16 @@ export const HomeScreen = () => {
     next.forEach(item => pushToken(item.type, item.value));
   };
 
-  const storeToHistory = (expression: string, result: string): void => {
+  const storeToHistory = (expression: string, result: string, tokenText: string | null): void => {
     const nextEntry: HistoryEntry = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
       expression,
       result,
+      createdAt: getTodayStamp(),
+      tokenText,
     };
 
-    setHistoryEntries(previous => [nextEntry, ...previous].slice(0, 8));
+    setHistoryEntries(previous => [nextEntry, ...previous].slice(0, MAX_HISTORY_ENTRIES));
   };
 
   const resolveExpression = (): void => {
@@ -424,6 +478,7 @@ export const HomeScreen = () => {
     }
 
     let result = '';
+    let tokenText: string | null = null;
 
     try {
       const resolvedAnswer = resolveAnswer(expression);
@@ -433,16 +488,16 @@ export const HomeScreen = () => {
       setLastResolvedAnswer(resolvedAnswer);
       setSelectedAnswerUnitsByDimension(nextSelectedUnits);
       result = nextDisplay.resultText;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Invalid expression.';
-      result = `Error: ${message}`;
+      tokenText = nextDisplay.ansTokenText;
+    } catch {
+      result = USER_ERROR_TEXT;
       setLastResolvedAnswer(null);
       setSelectedAnswerUnitsByDimension({});
       setActiveAnswerUnitDimension(null);
     }
 
     setLastResult(result);
-    storeToHistory(expression, result);
+    storeToHistory(expression, result, tokenText);
     setClearInputOnNextEntry(true);
   };
 
@@ -525,9 +580,102 @@ export const HomeScreen = () => {
       return;
     }
 
+    setOverflowMenuVisible(false);
     setActiveAnswerUnitDimension(baseDimension);
     setBottomSheetMode('answerUnits');
   };
+
+  const clearHistory = (): void => {
+    setHistoryEntries([]);
+  };
+
+  const insertHistoryEntry = (entry: HistoryEntry): void => {
+    if (!entry.tokenText) {
+      return;
+    }
+
+    setActivePage('calculator');
+    pushToken('answer', entry.tokenText);
+  };
+
+  if (activePage !== 'calculator') {
+    return (
+      <ScreenPage
+        title={
+          activePage === 'history'
+            ? 'History'
+            : activePage === 'settings'
+              ? 'Settings'
+              : activePage === 'about'
+                ? 'About Calculator'
+                : 'Privacy'
+        }
+        onBack={() => setActivePage(activePage === 'about' || activePage === 'privacy' ? 'settings' : 'calculator')}
+        action={
+          activePage === 'history'
+            ? (
+              <Pressable style={({ pressed }) => [styles.pageHeaderAction, pressed && styles.scaleDown]} onPress={clearHistory}>
+                <Text style={styles.pageHeaderActionText}>Clear</Text>
+              </Pressable>
+            )
+            : null
+        }
+      >
+        {activePage === 'history' ? (
+          historyEntries.length === 0 ? (
+            <View style={styles.pageCard}>
+              <Text style={styles.pageEmptyTitle}>No history yet</Text>
+              <Text style={styles.pageEmptyBody}>Your recent calculations will appear here after you press =.</Text>
+            </View>
+          ) : (
+            historyEntries.map(item => (
+              <Pressable
+                key={item.id}
+                style={({ pressed }) => [
+                  styles.historyPageCard,
+                  !item.tokenText && styles.historyPageCardDisabled,
+                  pressed && item.tokenText && styles.scaleDown,
+                ]}
+                onPress={() => insertHistoryEntry(item)}
+                disabled={!item.tokenText}
+              >
+                <Text style={styles.historyPageExpression}>{item.expression}</Text>
+                <Text style={styles.historyPageResult}>{item.result}</Text>
+                <Text style={styles.historyPageDate}>{item.createdAt}</Text>
+              </Pressable>
+            ))
+          )
+        ) : null}
+
+        {activePage === 'settings' ? (
+          <View style={styles.pageCard}>
+            <View style={styles.settingsBlock}>
+              <Text style={styles.settingsLabel}>Version</Text>
+              <Text style={styles.settingsValue}>{APP_VERSION}</Text>
+            </View>
+
+            <Pressable style={({ pressed }) => [styles.settingsRow, pressed && styles.scaleDown]} onPress={() => openPage('about')}>
+              <Text style={styles.settingsRowLabel}>About Calculator</Text>
+              <Text style={styles.settingsRowArrow}>{'>'}</Text>
+            </Pressable>
+
+            <Pressable style={({ pressed }) => [styles.settingsRow, pressed && styles.scaleDown]} onPress={() => openPage('privacy')}>
+              <Text style={styles.settingsRowLabel}>Privacy</Text>
+              <Text style={styles.settingsRowArrow}>{'>'}</Text>
+            </Pressable>
+          </View>
+        ) : null}
+
+        {activePage === 'about' ? (
+          <TextPage title="About Calculator" paragraphs={ABOUT_COPY} />
+        ) : null}
+
+        {activePage === 'privacy' ? (
+          <TextPage title="Privacy" paragraphs={PRIVACY_COPY} />
+        ) : null}
+      </ScreenPage>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -535,15 +683,18 @@ export const HomeScreen = () => {
         <View style={styles.topBarActions}>
           <Pressable
             style={({ pressed }) => [
-              styles.historyButton,
+              styles.topBarButton,
               bottomSheetMode === 'inputUnits' && styles.historyButtonActive,
               pressed && styles.scaleDown,
             ]}
-            onPress={() => setBottomSheetMode(previous => (previous === 'inputUnits' ? null : 'inputUnits'))}
+            onPress={() => {
+              setOverflowMenuVisible(false);
+              setBottomSheetMode(previous => (previous === 'inputUnits' ? null : 'inputUnits'));
+            }}
           >
             <Text
               style={[
-                styles.historyButtonLabel,
+                styles.topBarButtonLabel,
                 bottomSheetMode === 'inputUnits' && styles.historyButtonLabelActive,
               ]}
             >
@@ -552,26 +703,59 @@ export const HomeScreen = () => {
           </Pressable>
 
           <Pressable
-            style={({ pressed }) => [styles.historyButton, pressed && styles.scaleDown]}
-            onPress={() => setHistoryVisible(previous => !previous)}
+            style={({ pressed }) => [
+              styles.topBarButton,
+              morePadVisible && styles.historyButtonActive,
+              pressed && styles.scaleDown,
+            ]}
+            onPress={() => {
+              setOverflowMenuVisible(false);
+              setMorePadVisible(previous => !previous);
+            }}
           >
-            <Text style={styles.historyButtonLabel}>History</Text>
+            <Text style={[styles.topBarButtonLabel, morePadVisible && styles.historyButtonLabelActive]}>
+              More
+            </Text>
           </Pressable>
 
           <Pressable
             style={({ pressed }) => [
-              styles.historyButton,
-              morePadVisible && styles.historyButtonActive,
+              styles.topBarIconButton,
+              overflowMenuVisible && styles.topBarIconButtonActive,
               pressed && styles.scaleDown,
             ]}
-            onPress={() => setMorePadVisible(previous => !previous)}
+            onPress={() => {
+              setBottomSheetMode(null);
+              setOverflowMenuVisible(previous => !previous);
+            }}
           >
-            <Text style={[styles.historyButtonLabel, morePadVisible && styles.historyButtonLabelActive]}>
-              More
-            </Text>
+            <Text style={[styles.topBarIconLabel, overflowMenuVisible && styles.topBarIconLabelActive]}>⋮</Text>
           </Pressable>
         </View>
       </View>
+
+      {overflowMenuVisible ? (
+        <View style={styles.overflowMenuWrap}>
+          <Pressable style={styles.overflowMenuBackdrop} onPress={() => setOverflowMenuVisible(false)} />
+          <View style={styles.overflowMenuCard}>
+            <Pressable
+              style={({ pressed }) => [styles.overflowMenuItem, pressed && styles.overflowMenuItemPressed]}
+              onPress={() => openPage('history')}
+            >
+              <Text style={styles.overflowMenuIcon}>◷</Text>
+              <Text style={styles.overflowMenuLabel}>History</Text>
+            </Pressable>
+            <View style={styles.overflowMenuDivider} />
+            <Pressable
+              style={({ pressed }) => [styles.overflowMenuItem, pressed && styles.overflowMenuItemPressed]}
+              onPress={() => openPage('settings')}
+            >
+              <Text style={styles.overflowMenuIcon}>⚙</Text>
+              <Text style={styles.overflowMenuLabel}>Settings</Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
 
       <View style={styles.displayCard}>
         <Text style={styles.expressionText} numberOfLines={2}>
@@ -631,28 +815,6 @@ export const HomeScreen = () => {
           )}
         </ScrollView>
       </View>
-
-      {historyVisible && (
-        <View style={styles.historyPanel}>
-          <Text style={styles.historyTitle}>Recent</Text>
-          {historyEntries.length === 0 ? (
-            <Text style={styles.historyEmpty}>No history yet</Text>
-          ) : (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              {historyEntries.map(item => (
-                <View key={item.id} style={styles.historyChip}>
-                  <Text style={styles.historyExpression} numberOfLines={1}>
-                    {item.expression}
-                  </Text>
-                  <Text style={styles.historyResult} numberOfLines={1}>
-                    {item.result}
-                  </Text>
-                </View>
-              ))}
-            </ScrollView>
-          )}
-        </View>
-      )}
 
       <View style={styles.keypadGrid}>
         {activePadButtons.map((button, index) => (
@@ -788,6 +950,53 @@ const PadKey = ({
   );
 };
 
+const ScreenPage = ({
+  title,
+  onBack,
+  action,
+  children,
+}: {
+  title: string;
+  onBack: () => void;
+  action?: ReactNode;
+  children: ReactNode;
+}) => {
+  return (
+    <View style={styles.pageContainer}>
+      <View style={styles.pageHeader}>
+        <Pressable style={({ pressed }) => [styles.pageHeaderBack, pressed && styles.scaleDown]} onPress={onBack}>
+          <Text style={styles.pageHeaderBackText}>{'<'}</Text>
+        </Pressable>
+        <Text style={styles.pageHeaderTitle}>{title}</Text>
+        <View style={styles.pageHeaderActionSlot}>{action}</View>
+      </View>
+
+      <ScrollView style={styles.pageScroll} contentContainerStyle={styles.pageContent}>
+        {children}
+      </ScrollView>
+    </View>
+  );
+};
+
+const TextPage = ({
+  title,
+  paragraphs,
+}: {
+  title: string;
+  paragraphs: readonly string[];
+}) => {
+  return (
+    <View style={styles.pageCard}>
+      <Text style={styles.textPageTitle}>{title}</Text>
+      {paragraphs.map((paragraph, index) => (
+        <Text key={`${title}-${index}`} style={styles.textPageParagraph}>
+          {paragraph}
+        </Text>
+      ))}
+    </View>
+  );
+};
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -806,22 +1015,89 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 8,
   },
-  historyButton: {
+  topBarButton: {
     backgroundColor: '#ffffff',
     borderRadius: 16,
     paddingHorizontal: 14,
     paddingVertical: 8,
   },
+  topBarIconButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#ffffff',
+  },
+  topBarIconButtonActive: {
+    backgroundColor: '#2563eb',
+  },
   historyButtonActive: {
     backgroundColor: '#2563eb',
   },
-  historyButtonLabel: {
+  topBarButtonLabel: {
     fontSize: 13,
     fontWeight: '600',
     color: '#374151',
   },
+  topBarIconLabel: {
+    fontSize: 22,
+    lineHeight: 22,
+    fontWeight: '700',
+    color: '#374151',
+  },
+  topBarIconLabelActive: {
+    color: '#ffffff',
+  },
   historyButtonLabelActive: {
     color: '#ffffff',
+  },
+  overflowMenuWrap: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 20,
+  },
+  overflowMenuBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  overflowMenuCard: {
+    position: 'absolute',
+    top: 72,
+    right: 16,
+    width: 220,
+    borderRadius: 28,
+    backgroundColor: '#ffffff',
+    paddingVertical: 12,
+    paddingHorizontal: 18,
+    shadowColor: '#0f172a',
+    shadowOpacity: 0.08,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 10,
+  },
+  overflowMenuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+    paddingVertical: 18,
+  },
+  overflowMenuItemPressed: {
+    opacity: 0.75,
+  },
+  overflowMenuIcon: {
+    width: 34,
+    fontSize: 28,
+    color: '#111827',
+    textAlign: 'center',
+  },
+  overflowMenuLabel: {
+    fontSize: 18,
+    fontWeight: '500',
+    color: '#111827',
+  },
+  overflowMenuDivider: {
+    height: 1,
+    backgroundColor: '#e5e7eb',
+    marginLeft: 50,
   },
   displayCard: {
     borderRadius: 28,
@@ -844,8 +1120,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'flex-end',
     gap: 10,
+    flexWrap: 'wrap',
   },
   resultText: {
+    flexShrink: 1,
+    minWidth: 0,
     textAlign: 'right',
     color: '#0f172a',
     fontSize: 34,
@@ -907,40 +1186,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     color: '#1d4ed8',
-  },
-  historyPanel: {
-    borderRadius: 20,
-    backgroundColor: '#ffffff',
-    padding: 12,
-    marginBottom: 12,
-  },
-  historyTitle: {
-    fontSize: 12,
-    color: '#6b7280',
-    marginBottom: 8,
-    fontWeight: '600',
-  },
-  historyEmpty: {
-    fontSize: 13,
-    color: '#9ca3af',
-  },
-  historyChip: {
-    borderRadius: 16,
-    backgroundColor: '#f3f4f6',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    marginRight: 8,
-    minWidth: 140,
-  },
-  historyExpression: {
-    fontSize: 12,
-    color: '#6b7280',
-    marginBottom: 4,
-  },
-  historyResult: {
-    fontSize: 13,
-    color: '#111827',
-    fontWeight: '600',
   },
   keypadGrid: {
     flex: 1,
@@ -1060,6 +1305,152 @@ const styles = StyleSheet.create({
   },
   unitChipLabelSelected: {
     color: '#ffffff',
+  },
+  pageContainer: {
+    flex: 1,
+    backgroundColor: '#f2f4f7',
+    paddingTop: (Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 18) + 12,
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+  },
+  pageHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 18,
+  },
+  pageHeaderBack: {
+    width: 42,
+    height: 42,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#ffffff',
+  },
+  pageHeaderBackText: {
+    fontSize: 22,
+    fontWeight: '600',
+    color: '#111827',
+  },
+  pageHeaderTitle: {
+    flex: 1,
+    marginLeft: 12,
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  pageHeaderActionSlot: {
+    minWidth: 56,
+    alignItems: 'flex-end',
+  },
+  pageHeaderAction: {
+    borderRadius: 16,
+    backgroundColor: '#ffffff',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  pageHeaderActionText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#b91c1c',
+  },
+  pageScroll: {
+    flex: 1,
+  },
+  pageContent: {
+    paddingBottom: 24,
+    gap: 14,
+  },
+  pageCard: {
+    borderRadius: 28,
+    backgroundColor: '#ffffff',
+    padding: 20,
+    shadowColor: '#0f172a',
+    shadowOpacity: 0.04,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 4,
+  },
+  pageEmptyTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#111827',
+    marginBottom: 8,
+  },
+  pageEmptyBody: {
+    fontSize: 14,
+    lineHeight: 22,
+    color: '#6b7280',
+  },
+  historyPageCard: {
+    borderRadius: 28,
+    backgroundColor: '#ffffff',
+    paddingHorizontal: 20,
+    paddingVertical: 18,
+    shadowColor: '#0f172a',
+    shadowOpacity: 0.04,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 4,
+  },
+  historyPageCardDisabled: {
+    opacity: 0.55,
+  },
+  historyPageExpression: {
+    fontSize: 16,
+    color: '#6b7280',
+    marginBottom: 8,
+  },
+  historyPageResult: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#111827',
+    marginBottom: 10,
+  },
+  historyPageDate: {
+    fontSize: 14,
+    color: '#9ca3af',
+  },
+  settingsBlock: {
+    paddingBottom: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e7eb',
+  },
+  settingsLabel: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#111827',
+    marginBottom: 6,
+  },
+  settingsValue: {
+    fontSize: 15,
+    color: '#6b7280',
+  },
+  settingsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingTop: 18,
+  },
+  settingsRowLabel: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#111827',
+  },
+  settingsRowArrow: {
+    fontSize: 24,
+    color: '#9ca3af',
+  },
+  textPageTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#111827',
+    marginBottom: 14,
+  },
+  textPageParagraph: {
+    fontSize: 15,
+    lineHeight: 24,
+    color: '#475569',
+    marginBottom: 14,
   },
   scaleDown: {
     transform: [{ scale: 0.96 }],

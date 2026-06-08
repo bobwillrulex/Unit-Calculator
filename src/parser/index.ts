@@ -153,8 +153,23 @@ const parsePower = (state: ParseState): ExpressionNode => {
 const implicitMultiplicationStarts = (token: Token): boolean =>
   token.type === 'number' || token.type === 'unit' || token.type === 'lparen';
 
-const parseMultiplicative = (state: ParseState): ExpressionNode => {
+const parseImplicitMultiplicative = (state: ParseState): ExpressionNode => {
   let expression = parsePower(state);
+
+  while (implicitMultiplicationStarts(peek(state))) {
+    expression = {
+      kind: 'binary-expression',
+      operator: '*',
+      left: expression,
+      right: parsePower(state),
+    };
+  }
+
+  return expression;
+};
+
+const parseMultiplicative = (state: ParseState): ExpressionNode => {
+  let expression = parseImplicitMultiplicative(state);
 
   while (true) {
     if (matchOperator(state, '*') || matchOperator(state, '/')) {
@@ -162,21 +177,12 @@ const parseMultiplicative = (state: ParseState): ExpressionNode => {
         kind: 'binary-expression',
         operator: previous(state).lexeme as BinaryOperator,
         left: expression,
-        right: parsePower(state),
+        right: parseImplicitMultiplicative(state),
       };
       continue;
     }
 
-    if (!implicitMultiplicationStarts(peek(state))) {
-      return expression;
-    }
-
-    expression = {
-      kind: 'binary-expression',
-      operator: '*',
-      left: expression,
-      right: parsePower(state),
-    };
+    return expression;
   }
 };
 
