@@ -75,7 +75,28 @@ npm.cmd install
 - `npm run android` or `npm.cmd run android`: run on Android
 - `npm run ios` or `npm.cmd run ios`: run on iOS
 - `npm run web` or `npm.cmd run web`: run on web
+- `npm run build:android:preview` or `npm.cmd run build:android:preview`: create an internal Android APK through EAS
+- `npm run build:android:production` or `npm.cmd run build:android:production`: create a Play Store Android App Bundle through EAS
+- `npm run submit:android` or `npm.cmd run submit:android`: submit the production Android build to the internal Play track through EAS
 - `npm run typecheck` or `npm.cmd run typecheck`: run TypeScript checks
+
+## Android Release
+
+The Android release identity lives in `app.json`.
+
+- Package name: `com.hugohuanqingchen.unitcalculator`
+- App version: `1.0.0`
+- Android version code: `1`
+- Play build format: Android App Bundle (`.aab`)
+- Internal preview format: APK
+
+Before publishing, install and authenticate EAS CLI, then run:
+
+```powershell
+npm.cmd run build:android:production
+```
+
+The submit profile targets the Play Console internal track by default. A real Play submission still needs Google Play Console setup, a linked app, signing credentials, store listing assets, data safety answers, content rating, and a public privacy policy URL.
 
 ## History Behavior
 

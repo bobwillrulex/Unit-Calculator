@@ -290,6 +290,20 @@ const buildUnitLayout = (
   return { numerator, denominator };
 };
 
+const buildSignedUnitTerms = (
+  answer: ResolvedAnswer,
+  unitLayout: UnitLayout,
+): readonly UnitTerm[] => [
+  ...unitLayout.numerator.map(term => ({
+    ...term,
+    exponent: answer.dimension[term.baseDimension] ?? term.exponent,
+  })),
+  ...unitLayout.denominator.map(term => ({
+    ...term,
+    exponent: answer.dimension[term.baseDimension] ?? -term.exponent,
+  })),
+];
+
 const formatAnswerDisplay = (
   answer: ResolvedAnswer | null,
   selectedUnitsByDimension: Readonly<Partial<Record<BaseDimension, string>>>,
@@ -310,15 +324,10 @@ const formatAnswerDisplay = (
   }, 1);
   const convertedValue = answer.value / conversionDivisor;
   const numericText = formatNumericValue(convertedValue);
-  const numeratorText = unitLayout.numerator
+  const signedTerms = buildSignedUnitTerms(answer, unitLayout);
+  const unitText = signedTerms
     .map(term => formatUnitToken(term.unit.symbol, term.exponent))
     .join(' * ');
-  const denominatorText = unitLayout.denominator
-    .map(term => formatUnitToken(term.unit.symbol, term.exponent))
-    .join(' * ');
-  const unitText = denominatorText.length === 0
-    ? numeratorText
-    : `${numeratorText || '1'} / ${denominatorText}`;
 
   if (unitText.length === 0) {
     return {
@@ -329,12 +338,9 @@ const formatAnswerDisplay = (
     };
   }
 
-  const ansUnitText = denominatorText.length === 0
-    ? unitLayout.numerator.map(term => `${term.unit.symbol}${term.exponent === 1 ? '' : `^${term.exponent}`}`).join(' * ')
-    : `${unitLayout.numerator.length === 0
-      ? '1'
-      : unitLayout.numerator.map(term => `${term.unit.symbol}${term.exponent === 1 ? '' : `^${term.exponent}`}`).join(' * ')
-    } / ${unitLayout.denominator.map(term => `${term.unit.symbol}${term.exponent === 1 ? '' : `^${term.exponent}`}`).join(' * ')}`;
+  const ansUnitText = signedTerms
+    .map(term => `${term.unit.symbol}${term.exponent === 1 ? '' : `^${term.exponent}`}`)
+    .join(' * ');
 
   return {
     resultText: `${numericText} ${unitText}`,
@@ -721,7 +727,7 @@ export const HomeScreen = () => {
           <Pressable
             style={({ pressed }) => [
               styles.topBarIconButton,
-              overflowMenuVisible && styles.topBarIconButtonActive,
+              pressed && styles.keyPressed,
               pressed && styles.scaleDown,
             ]}
             onPress={() => {
@@ -765,24 +771,10 @@ export const HomeScreen = () => {
           <Text style={styles.resultText} numberOfLines={1}>
             {resultDisplayText}
           </Text>
-          {answerDisplay.unitLayout ? (
+          {answerDisplay.unitLayout && lastResolvedAnswer ? (
             <View style={styles.resultUnitExpression}>
-              {answerDisplay.unitLayout.numerator.map((term, index) => (
-                <View key={`${term.baseDimension}-num`} style={styles.resultUnitTokenRow}>
-                  {index > 0 ? <Text style={styles.resultUnitOperator}>*</Text> : null}
-                  <Pressable
-                    onPress={() => openAnswerUnitSheet(term.baseDimension)}
-                    style={({ pressed }) => [styles.resultUnitChip, pressed && styles.scaleDown]}
-                  >
-                    <Text style={styles.resultUnitText}>{formatUnitToken(term.unit.symbol, term.exponent)}</Text>
-                  </Pressable>
-                </View>
-              ))}
-              {answerDisplay.unitLayout.denominator.length > 0 ? (
-                <Text style={styles.resultUnitOperator}>/</Text>
-              ) : null}
-              {answerDisplay.unitLayout.denominator.map((term, index) => (
-                <View key={`${term.baseDimension}-den`} style={styles.resultUnitTokenRow}>
+              {buildSignedUnitTerms(lastResolvedAnswer, answerDisplay.unitLayout).map((term, index) => (
+                <View key={term.baseDimension} style={styles.resultUnitTokenRow}>
                   {index > 0 ? <Text style={styles.resultUnitOperator}>*</Text> : null}
                   <Pressable
                     onPress={() => openAnswerUnitSheet(term.baseDimension)}
@@ -869,7 +861,7 @@ export const HomeScreen = () => {
                         ? unit.id === selectedAnswerUnitsByDimension[activeAnswerUnitDimension]
                         : false;
                       const exponent = activeAnswerUnitDimension
-                        ? Math.abs(lastResolvedAnswer?.dimension[activeAnswerUnitDimension] ?? 1)
+                        ? (lastResolvedAnswer?.dimension[activeAnswerUnitDimension] ?? 1)
                         : 1;
                       const label = formatUnitToken(unit.symbol, exponent);
 
@@ -1018,6 +1010,9 @@ const styles = StyleSheet.create({
   topBarButton: {
     backgroundColor: '#ffffff',
     borderRadius: 16,
+    minWidth: 72,
+    alignItems: 'center',
+    justifyContent: 'center',
     paddingHorizontal: 14,
     paddingVertical: 8,
   },
@@ -1030,7 +1025,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
   },
   topBarIconButtonActive: {
-    backgroundColor: '#2563eb',
+    backgroundColor: '#ffffff',
   },
   historyButtonActive: {
     backgroundColor: '#2563eb',
@@ -1047,7 +1042,7 @@ const styles = StyleSheet.create({
     color: '#374151',
   },
   topBarIconLabelActive: {
-    color: '#ffffff',
+    color: '#374151',
   },
   historyButtonLabelActive: {
     color: '#ffffff',
@@ -1061,43 +1056,43 @@ const styles = StyleSheet.create({
   },
   overflowMenuCard: {
     position: 'absolute',
-    top: 72,
-    right: 16,
-    width: 220,
-    borderRadius: 28,
+    top: 92,
+    right: 6,
+    width: 188,
+    borderRadius: 24,
     backgroundColor: '#ffffff',
-    paddingVertical: 12,
-    paddingHorizontal: 18,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
     shadowColor: '#0f172a',
     shadowOpacity: 0.08,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 10,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 8,
   },
   overflowMenuItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 16,
-    paddingVertical: 18,
+    gap: 12,
+    paddingVertical: 14,
   },
   overflowMenuItemPressed: {
     opacity: 0.75,
   },
   overflowMenuIcon: {
-    width: 34,
-    fontSize: 28,
+    width: 28,
+    fontSize: 22,
     color: '#111827',
     textAlign: 'center',
   },
   overflowMenuLabel: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '500',
     color: '#111827',
   },
   overflowMenuDivider: {
     height: 1,
     backgroundColor: '#e5e7eb',
-    marginLeft: 50,
+    marginLeft: 40,
   },
   displayCard: {
     borderRadius: 28,
